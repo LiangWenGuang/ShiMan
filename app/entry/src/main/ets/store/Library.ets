@@ -14,6 +14,7 @@ const STORE = 'manyu_library';
 const KEY_SHELF = 'shelf';
 const KEY_PROGRESS = 'progress';
 const KEY_FAVORITE = 'favorite';
+const KEY_CHAPTER_DESCENDING = 'chapter_descending';
 
 function enc(value: string): string {
   return encodeURIComponent(value.length > 0 ? value : '');
@@ -34,6 +35,8 @@ export class Library {
   /** 星标收藏：和书架分开存，书架是「在追」，收藏是「想留着」 */
   private favoriteItems: ShelfItem[] = [];
   private progressItems: Map<string, ReadProgress> = new Map<string, ReadProgress>();
+  /** 详情页与阅读器共用的目录展示顺序，不影响章节原始索引 */
+  private chapterDescending: boolean = false;
   private ready: boolean = false;
 
   static get(): Library {
@@ -64,10 +67,35 @@ export class Library {
           this.progressItems.set(this.keyOf(list[i].sourceId, list[i].comicId), list[i]);
         }
       }
+      const chapterOrderRaw = await this.store.get(KEY_CHAPTER_DESCENDING, false);
+      if (typeof chapterOrderRaw === 'boolean') {
+        this.chapterDescending = chapterOrderRaw;
+      }
     } catch (error) {
       // 读取失败按空库处理，不影响使用
     }
     this.ready = true;
+  }
+
+  isChapterDescending(): boolean {
+    return this.chapterDescending;
+  }
+
+  setChapterDescending(descending: boolean): void {
+    if (this.chapterDescending === descending) {
+      return;
+    }
+    this.chapterDescending = descending;
+    if (this.store === null) {
+      return;
+    }
+    this.store.put(KEY_CHAPTER_DESCENDING, descending).then(() => {
+      if (this.store !== null) {
+        this.store.flush();
+      }
+    }).catch(() => {
+      // 内存中的偏好仍然生效，下次启动沿用上次成功写入的值
+    });
   }
 
   private keyOf(sourceId: string, comicId: string): string {
@@ -125,6 +153,8 @@ export class Library {
       item.page = isNaN(page) ? 0 : page;
       const stamp = parseInt(parts[8], 10);
       item.updatedAt = isNaN(stamp) ? 0 : stamp;
+      // 第 10 列是后加的详情页地址；老记录没有这一列，留空由调用方兜底
+      item.url = parts.length > 9 ? dec(parts[9]) : '';
       out.push(item);
     }
     return out;
@@ -255,6 +285,28 @@ export class Library {
     return found === undefined ? null : found;
   }
 
+  /**
+   * 找一本漫画的详情页地址：先看阅读进度，再看书架、收藏。
+   * 老版本存下的进度没有 url，只能靠书架兜底 —— 用户基本都会先把书加进书架。
+   */
+  resolveComicUrl(sourceId: string, comicId: string): string {
+    const recorded = this.progress(sourceId, comicId);
+    if (recorded !== null && recorded.url.length > 0) {
+      return recorded.url;
+    }
+    const pools: ShelfItem[][] = [this.shelfItems, this.favoriteItems];
+    for (let p = 0; p < pools.length; p++) {
+      const pool = pools[p];
+      for (let i = 0; i < pool.length; i++) {
+        const item = pool[i];
+        if (item.sourceId === sourceId && item.comicId === comicId && item.url.length > 0) {
+          return item.url;
+        }
+      }
+    }
+    return '';
+  }
+
   saveProgress(item: ReadProgress): void {
     item.updatedAt = Date.now();
     this.progressItems.set(this.keyOf(item.sourceId, item.comicId), item);
@@ -286,7 +338,7 @@ export class Library {
       lines.push([
         enc(item.sourceId), enc(item.comicId), enc(item.title), enc(item.cover),
         enc(item.chapterId), String(item.chapterIndex), enc(item.chapterTitle),
-        String(item.page), String(item.updatedAt)
+        String(item.page), String(item.updatedAt), enc(item.url)
       ].join('\t'));
     }
     this.store.put(KEY_PROGRESS, lines.join('\n')).then(() => {

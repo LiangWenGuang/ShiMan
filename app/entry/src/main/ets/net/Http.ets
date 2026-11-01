@@ -102,11 +102,25 @@ export class Http {
     return Http.send(url, http.RequestMethod.GET, headers, fallbackCharset);
   }
 
+  /**
+   * 发起 POST 请求。只给「取目录」这类重复调用且无副作用接口用；
+   * 非幂等请求不会重试（见文件头第 1 条规则）。
+   */
+  static async post(
+    url: string,
+    headers: HttpHeader[],
+    fallbackCharset: string,
+    body: string
+  ): Promise<HttpResponse> {
+    return Http.send(url, http.RequestMethod.POST, headers, fallbackCharset, body);
+  }
+
   static async send(
     url: string,
     method: http.RequestMethod,
     headers: HttpHeader[],
-    fallbackCharset: string
+    fallbackCharset: string,
+    body: string = ''
   ): Promise<HttpResponse> {
     const result = new HttpResponse();
     if (url.length === 0) {
@@ -125,6 +139,7 @@ export class Http {
       const response: http.HttpResponse = await request.request(url, {
         method: method,
         header: headerObject,
+        extraData: body.length > 0 ? body : undefined,
         expectDataType: http.HttpDataType.ARRAY_BUFFER,
         usingCache: false,
         connectTimeout: 15000,

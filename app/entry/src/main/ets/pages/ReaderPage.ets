@@ -3,7 +3,7 @@ import { webview } from '@kit.ArkWeb';
 import { SourceRegistry } from '../source/SourceRegistry';
 import { SourceApi, ImageResult } from '../source/SourceApi';
 import { SourceRule } from '../rule/Rules';
-import { ComicDetail, ChapterBrief, PageImage, ReadProgress } from '../model/Models';
+import { ComicBrief, ComicDetail, ChapterBrief, PageImage, ReadProgress } from '../model/Models';
 import { Library } from '../store/Library';
 import { ReaderParams, SwitchParams } from '../model/RouteParams';
 import { parseJson, JsonKind } from '../parse/Json';
@@ -27,6 +27,8 @@ struct ReaderPage {
   @State error: string = '';
   @State showUi: boolean = true;
   @State showCatalog: boolean = false;
+  /** 目录展示顺序，与详情页共用同一偏好 */
+  @State chapterDescending: boolean = false;
   @State loadingText: string = '正在取图…';
   @State currentPage: number = 0;
 
@@ -48,12 +50,14 @@ struct ReaderPage {
 
   private params: ReaderParams = new ReaderParams();
   private scroller: Scroller = new Scroller();
+  private catalogScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     const raw = router.getParams() as ReaderParams;
     if (raw !== undefined && raw !== null) {
       this.params = raw;
     }
+    this.chapterDescending = Library.get().isChapterDescending();
     this.bootstrap();
   }
 
@@ -65,13 +69,35 @@ struct ReaderPage {
       this.error = '图源不存在';
       return;
     }
-    const detailOutcome = await SourceApi.detail(rule, this.params.comicId, this.params.comicUrl);
+    // 从书架/历史直接进阅读器时没有带详情地址，必须自己找回来，
+    // 否则只剩 baseUrl+id 的兜底拼接，各站路径不同 -> 必然 404
+    let comicUrl = this.params.comicUrl;
+    if (comicUrl.length === 0) {
+      comicUrl = Library.get().resolveComicUrl(this.params.sourceId, this.params.comicId);
+      this.params.comicUrl = comicUrl;
+    }
+    let detailOutcome = await SourceApi.detail(rule, this.params.comicId, comicUrl);
+    if (!detailOutcome.ok && comicUrl.length > 0) {
+      // 记下的地址可能已经过期（站点改版），再按源内约定重试一次
+      detailOutcome = await SourceApi.detail(rule, this.params.comicId, '');
+    }
+    if (!detailOutcome.ok) {
+      // 最后的自救：按书名回源站搜一次，命中同名就把地址纠正过来。
+      // 老版本的进度记录没有存地址，这条路径能救回来。
+      const healed = await this.healUrlByTitle(rule);
+      if (healed.length > 0) {
+        this.params.comicUrl = healed;
+        detailOutcome = await SourceApi.detail(rule, this.params.comicId, healed);
+      }
+    }
     if (!detailOutcome.ok || detailOutcome.value === undefined) {
       this.loading = false;
       this.error = detailOutcome.message;
       return;
     }
     this.detail = detailOutcome.value;
+    // 详情地址可能有更新，写回参数，换源与重试都用得上
+    this.params.comicUrl = this.detail.url;
     let start = this.params.chapterIndex;
     if (this.params.chapterId.length > 0) {
       for (let i = 0; i < this.detail.chapters.length; i++) {
@@ -86,6 +112,28 @@ struct ReaderPage {
       start = 0;
     }
     await this.loadChapter(start);
+  }
+
+  /** 详情地址未知时，用书名回源站搜一次，返回最匹配的详情地址 */
+  private async healUrlByTitle(rule: SourceRule): Promise<string> {
+    const progress = Library.get().progress(this.params.sourceId, this.params.comicId);
+    const title = progress === null ? '' : progress.title;
+    if (title.length === 0) {
+      return '';
+    }
+    this.loadingText = '正在重新定位这本漫画…';
+    const outcome = await SourceApi.search(rule, title, 1);
+    if (!outcome.ok || outcome.value === undefined) {
+      return '';
+    }
+    const items: ComicBrief[] = outcome.value;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.url.length > 0 && (item.title === title || item.title.indexOf(title) >= 0)) {
+        return item.url;
+      }
+    }
+    return '';
   }
 
   private async loadChapter(index: number): Promise<void> {
@@ -246,11 +294,56 @@ struct ReaderPage {
     progress.comicId = this.detail.comicId;
     progress.title = this.detail.title;
     progress.cover = this.detail.cover;
+    progress.url = this.detail.url;
     progress.chapterId = chapter.chapterId;
     progress.chapterIndex = this.chapterIndex;
     progress.chapterTitle = chapter.title;
     progress.page = this.currentPage;
     Library.get().saveProgress(progress);
+  }
+
+  /** 目录按当前排序显示，翻的是副本；上一章/下一章仍按原始章节顺序 */
+  private orderedChapters(): ChapterBrief[] {
+    if (this.detail === null) {
+      return [];
+    }
+    const items: ChapterBrief[] = this.detail.chapters.slice();
+    if (this.chapterDescending) {
+      items.reverse();
+    }
+    return items;
+  }
+
+  private openCatalog(): void {
+    this.showCatalog = true;
+    // 等目录布局完成再滚，直接滚会因为 List 还没测量而落到错位置
+    setTimeout(() => {
+      this.scrollCatalogToCurrent();
+    }, 80);
+  }
+
+  /** 把目录滚到当前正在读的那一章，避免上千章时从头翻 */
+  private scrollCatalogToCurrent(): void {
+    if (this.detail === null) {
+      return;
+    }
+    const total = this.detail.chapters.length;
+    const position = this.chapterDescending ? total - 1 - this.chapterIndex : this.chapterIndex;
+    if (position <= 0 || position >= total) {
+      return;
+    }
+    try {
+      this.catalogScroller.scrollToIndex(position);
+    } catch (error) {
+      // 目录尚未布局完成时可能越界，忽略即可
+    }
+  }
+
+  private toggleChapterOrder(): void {
+    const next = !this.chapterDescending;
+    this.chapterDescending = next;
+    Library.get().setChapterDescending(next);
+    this.scrollCatalogToCurrent();
   }
 
   private openSwitch(): void {
@@ -369,7 +462,7 @@ struct ReaderPage {
           this.loadChapter(this.chapterIndex - 1);
         })
         this.barButton($r('sys.symbol.list_bullet'), '目录', () => {
-          this.showCatalog = true;
+          this.openCatalog();
         })
         this.barButton($r('sys.symbol.arrow_clockwise'), '换源', () => {
           this.openSwitch();
@@ -398,7 +491,18 @@ struct ReaderPage {
         Text(`${this.chapterIndex + 1} / ${this.detail === null ? 0 : this.detail.chapters.length}`)
           .fontSize(Theme.fsCaption)
           .fontColor(TEXT_SUB)
-          .margin({ right: Theme.gapL })
+          .margin({ right: Theme.gapS })
+        Text(this.chapterDescending ? '倒序 ↓' : '正序 ↑')
+          .fontSize(Theme.fsLabel)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(ACCENT)
+          .padding({ left: 9, right: 9, top: 5, bottom: 5 })
+          .backgroundColor(Theme.accentDim)
+          .borderRadius(Theme.radiusPill)
+          .margin({ right: Theme.gapM })
+          .onClick(() => {
+            this.toggleChapterOrder();
+          })
         SymbolGlyph($r('sys.symbol.xmark'))
           .fontSize(18)
           .fontColor([TEXT_SUB])
@@ -411,8 +515,8 @@ struct ReaderPage {
 
       Divider().color(Theme.line)
 
-      List() {
-        ForEach(this.detail === null ? [] : this.detail.chapters, (chapter: ChapterBrief) => {
+      List({ scroller: this.catalogScroller }) {
+        ForEach(this.orderedChapters(), (chapter: ChapterBrief) => {
           ListItem() {
             Row() {
               Text(chapter.title)

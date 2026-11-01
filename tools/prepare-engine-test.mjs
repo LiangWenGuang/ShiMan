@@ -24,7 +24,13 @@ const IMPORT_MAP = {
   '../parse/Selector': './Selector.ts',
   '../parse/Json': './Json.ts',
   '../util/Text': './Text.ts',
-  './Rules': './Rules.ts'
+  './Rules': './Rules.ts',
+  // 同目录内的相对导入（Selector 引 Html、Engine 引 Selector 等）
+  './Html': './Html.ts',
+  './Selector': './Selector.ts',
+  './Json': './Json.ts',
+  './Text': './Text.ts',
+  './Models': './Models.ts'
 };
 
 for (const [src, dst] of FILES) {

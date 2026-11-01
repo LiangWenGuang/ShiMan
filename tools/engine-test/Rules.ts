@@ -102,6 +102,15 @@ export class JsonChapterRule {
   linkField: string = 'url';
   /** link 是相对地址时的基准；留空用页面地址 */
   baseUrl: string = '';
+  /** get（默认）/ post：少数站点用 POST 返回整份目录 */
+  method: string = 'get';
+  /** method=post 时的请求体 */
+  body: string = '';
+  /**
+   * 目录接口只给 id、不给地址时，用模板拼：
+   * `/chapter/{contentId}-{id}.html`，花括号里是 JSON 字段名。
+   */
+  linkTemplate: string = '';
   enabled(): boolean {
     return this.source.length > 0;
   }
@@ -128,6 +137,16 @@ export class ImageRule {
    * 专门对付「图片只出现在 JSON-LD / 内联 JS 数组里、没有 img 标签」的站点。
    */
   pattern: string = '';
+  /**
+   * sequence 模式：图片是「一个前缀 + 序号」拼出来的，只给个数不给地址。
+   * 典型是 `var num = 45` + `var pasd = "https://cdn/xxx/"`，
+   * 正文图地址就是 pasd + 1..num + 后缀。
+   */
+  countPattern: string = '';
+  /** sequence 模式的地址模板，支持 {base} {i} {chapterUrl} {comicId} {chapterId} */
+  template: string = '';
+  /** sequence 模式没匹配到数量时的兜底上限，避免产出 0 张 */
+  maxCount: number = 300;
 }
 
 export class SourceRule {
@@ -252,6 +271,9 @@ export function ruleFromJson(root: JsonNode): SourceRule {
       target.json.titleField = str(jsonRule, 'titleField', 'title');
       target.json.linkField = str(jsonRule, 'linkField', 'url');
       target.json.baseUrl = str(jsonRule, 'baseUrl', '');
+      target.json.method = str(jsonRule, 'method', 'get');
+      target.json.body = str(jsonRule, 'body', '');
+      target.json.linkTemplate = str(jsonRule, 'linkTemplate', '');
     }
   }
 
@@ -266,6 +288,9 @@ export function ruleFromJson(root: JsonNode): SourceRule {
     target.extract = str(images, 'extract', '');
     target.settleMs = num(images, 'settleMs', 1200);
     target.pattern = str(images, 'pattern', '');
+    target.countPattern = str(images, 'countPattern', '');
+    target.template = str(images, 'template', '');
+    target.maxCount = num(images, 'maxCount', 300);
   }
 
   const browse = root.get('browse');

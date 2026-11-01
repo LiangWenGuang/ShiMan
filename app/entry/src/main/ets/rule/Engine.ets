@@ -333,10 +333,15 @@ export function parseChaptersFromJson(text: string, rule: SourceRule, pageUrl: s
     if (id.length === 0 && linkRaw.length === 0) {
       continue;
     }
+    let link = linkRaw;
+    // 接口只给 id 不给地址的站点，按模板拼（`/chapter/{contentId}-{id}.html`）
+    if (link.length === 0 && rule.chapters.json.linkTemplate.length > 0) {
+      link = applyJsonTemplate(item, rule.chapters.json.linkTemplate);
+    }
     const chapter = new ChapterBrief();
     chapter.chapterId = id.length > 0 ? id : extractNumericId(linkRaw);
     chapter.title = titleNode === null ? `第 ${i + 1} 话` : titleNode.asString();
-    chapter.url = linkRaw.length > 0 ? resolveUrl(base, linkRaw) : base;
+    chapter.url = link.length > 0 ? resolveUrl(base, link) : base;
     chapter.index = i;
     chapters.push(chapter);
   }
@@ -347,6 +352,26 @@ export function parseChaptersFromJson(text: string, rule: SourceRule, pageUrl: s
     }
   }
   return chapters;
+}
+
+/**
+ * 用 JSON 条目的字段拼地址：`/chapter/{contentId}-{id}.html`。
+ * 花括号里写字段名，取不到就留空，避免拼出 `undefined`。
+ */
+function applyJsonTemplate(item: JsonNode, template: string): string {
+  const tokens = template.match(new RegExp('\\{[A-Za-z0-9_]+\\}', 'g'));
+  let result = template;
+  if (tokens === null) {
+    return result;
+  }
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const name = token.substring(1, token.length - 1);
+    const node = item.get(name);
+    const value = node === null ? '' : node.asString();
+    result = result.split(token).join(value);
+  }
+  return result;
 }
 
 /** JSON 类源的图片解析 */
@@ -403,9 +428,70 @@ export function parseImagesFromHtml(html: string, rule: SourceRule, pageUrl: str
   return images;
 }
 
-/** 正则类源的图片解析：从原始 HTML 里直接抠地址 */
-export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: string): PageImage[] {
+/**
+ * 序号类源的图片解析。
+ *
+ * 一批国内漫画站把正文图写成「前缀 + 序号」：
+ *   var num =eval("45")
+ *   var pasd = "https://image1.example.com/mh/{hash}/{uuid}/"
+ *   for(i=1;i<=num;i++) img.src = pasd + i + ".webp"
+ * 页面里一个 <img> 都没有，光抠地址是抠不到的，但前缀和数量都在 HTML 里，
+ * 按模板生成即可 —— 比无头取图快两个数量级。
+ */
+export function parseImagesFromSequence(html: string, rule: SourceRule, pageUrl: string): PageImage[] {
   const images: PageImage[] = [];
+  if (rule.images.pattern.length === 0 || rule.images.template.length === 0) {
+    return images;
+  }
+  const base = firstCapture(html, rule.images.pattern);
+  if (base.length === 0) {
+    return images;
+  }
+  let count = 0;
+  if (rule.images.countPattern.length > 0) {
+    const raw = firstCapture(html, rule.images.countPattern);
+    const parsed = parseInt(raw, 10);
+    count = isNaN(parsed) ? 0 : parsed;
+  }
+  if (count <= 0) {
+    count = rule.images.maxCount;
+  }
+  if (count > rule.images.maxCount) {
+    count = rule.images.maxCount;
+  }
+  for (let i = 1; i <= count; i++) {
+    const url = rule.images.template
+      .replace('{base}', base)
+      .replace('{i}', String(i))
+      .replace('{chapterUrl}', pageUrl);
+    if (url.length === 0) {
+      continue;
+    }
+    const image = new PageImage();
+    image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
+    image.referer = pageUrl;
+    images.push(image);
+  }
+  return images;
+}
+
+/** 取第一个捕获组（无捕获组时取整个匹配） */
+function firstCapture(text: string, pattern: string): string {  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern);
+  } catch (error) {
+    return '';
+  }
+  const match = regex.exec(text);
+  if (match === null) {
+    return '';
+  }
+  const value = match.length > 1 ? match[1] : match[0];
+  return value === undefined ? '' : value.trim();
+}
+
+/** 正则类源的图片解析：从原始 HTML 里直接抠地址 */
+export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: string): PageImage[] {  const images: PageImage[] = [];
   if (rule.images.pattern.length === 0) {
     return images;
   }

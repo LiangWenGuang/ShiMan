@@ -1,0 +1,53 @@
+{
+  "id": "yunmanhua",
+  "name": "云漫画",
+  "baseUrl": "https://www.yunmanhua.com",
+  "charset": "utf-8",
+  "note": "搜索/详情/目录都是纯 HTML；正文图由页面脚本解密后写入，需无头取图，首次打开稍慢",
+  "headers": [
+    { "name": "Referer", "value": "https://www.yunmanhua.com/" }
+  ],
+  "search": {
+    "url": "/index.php/search?key={kw}",
+    "list": ".comic-item",
+    "id": "",
+    "title": ".comic-title@text",
+    "cover": ".comic-cover img@attr:src",
+    "link": "a@attr:href",
+    "author": ".comic-meta@text",
+    "latest": ""
+  },
+  "detail": {
+    "title": ".comic-info h1.title@text",
+    "cover": ".comic-info .cover img@attr:src",
+    "author": ".comic-info .meta .item:first-child@text~s|作者[:：]||",
+    "desc": "#comicDesc@text",
+    "status": ".comic-info .cover .status@text",
+    "tags": ".comic-info .tags@text"
+  },
+  "chapters": {
+    "list": ".chapter-list .list a",
+    "id": "",
+    "title": ".chapter-name@text",
+    "link": "@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "img[data-read-src]",
+    "extract": "attr:data-read-src",
+    "settleMs": 2500
+  },
+  "browse": [
+    {
+      "name": "首页推荐",
+      "url": "/",
+      "list": ".comic-item",
+      "title": ".comic-title@text",
+      "cover": ".comic-cover img@attr:src",
+      "link": "a@attr:href",
+      "author": ".comic-meta@text"
+    }
+  ]
+}

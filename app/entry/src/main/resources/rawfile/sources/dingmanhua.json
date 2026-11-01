@@ -1,0 +1,65 @@
+{
+  "id": "dingmanhua",
+  "name": "顶漫画",
+  "baseUrl": "https://www.dingmanhua.com",
+  "charset": "utf-8",
+  "note": "搜索/详情/目录都是纯 HTML；正文图由「前缀+序号」拼出，直接下载，无需执行网页脚本",
+  "headers": [
+    { "name": "Referer", "value": "https://www.dingmanhua.com/" }
+  ],
+  "search": {
+    "url": "/search?query={kw}",
+    "list": ".manga-card",
+    "id": "",
+    "title": ".manga-title@text",
+    "cover": "img@attr:data-src||img@attr:src",
+    "link": "a@attr:href",
+    "author": "",
+    "latest": ""
+  },
+  "detail": {
+    "title": "h1.manga-title@text",
+    "cover": ".manga-cover img@attr:src",
+    "author": "#mangaAuthor@text",
+    "desc": "#mangaDescription@text||.mobile-brief@text",
+    "status": ".meta-status@text~s|状态[:：]\\s*||",
+    "tags": ".manga-tags@text"
+  },
+  "chapters": {
+    "list": ".chapters-grid a",
+    "id": "",
+    "title": ".chapter-title@text",
+    "link": "@attr:href",
+    "reverse": true,
+    "json": {
+      "source": "remote",
+      "url": "/comic/{comicId}",
+      "method": "post",
+      "body": "{}",
+      "path": "$.data.chapters",
+      "idField": "id",
+      "titleField": "chapterName",
+      "linkField": "",
+      "linkTemplate": "/chapter/{contentId}-{id}.html",
+      "baseUrl": "https://www.dingmanhua.com"
+    }
+  },
+  "images": {
+    "type": "sequence",
+    "url": "{chapterUrl}",
+    "pattern": "var pasd = \"([^\"]+)\"",
+    "countPattern": "var num =eval\\(\"(\\d+)\"\\)",
+    "template": "{base}{i}.webp",
+    "maxCount": 200
+  },
+  "browse": [
+    {
+      "name": "首页推荐",
+      "url": "/",
+      "list": ".manga-grid .manga-card",
+      "title": ".manga-title@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href"
+    }
+  ]
+}

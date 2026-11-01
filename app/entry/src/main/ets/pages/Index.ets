@@ -656,6 +656,7 @@ struct Index {
       const params: ReaderParams = new ReaderParams();
       params.sourceId = item.sourceId;
       params.comicId = item.comicId;
+      params.comicUrl = item.url;
       params.chapterIndex = item.chapterIndex;
       params.chapterId = item.chapterId;
       router.pushUrl({ url: 'pages/ReaderPage', params: params });

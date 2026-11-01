@@ -23,6 +23,7 @@ struct DetailPage {
   @State favorited: boolean = false;
   @State descExpanded: boolean = false;
   @State chapterWindow: number = CHAPTER_WINDOW_STEP;
+  @State chapterDescending: boolean = false;
   @State progressHint: string = '';
   @State resumeIndex: number = 0;
   /** 图源站点地址，作为封面下载 Referer */
@@ -35,7 +36,17 @@ struct DetailPage {
     if (raw !== undefined && raw !== null) {
       this.params = raw;
     }
+    this.chapterDescending = Library.get().isChapterDescending();
     this.load();
+  }
+
+  /**
+   * 从阅读器返回时刷新进度：详情页只在进入时读过一次进度，
+   * 不刷新的话「继续阅读」会一直停在旧章节。
+   */
+  onPageShow(): void {
+    this.chapterDescending = Library.get().isChapterDescending();
+    this.refreshProgress();
   }
 
   private async load(): Promise<void> {
@@ -59,15 +70,64 @@ struct DetailPage {
     this.detail = outcome.value;
     this.onShelf = Library.get().isOnShelf(this.params.sourceId, this.params.comicId);
     this.favorited = Library.get().isFavorite(this.params.sourceId, this.params.comicId);
-    const progress: ReadProgress | null = Library.get().progress(this.params.sourceId, this.params.comicId);
-    if (progress !== null && this.detail !== null) {
-      this.resumeIndex = progress.chapterIndex;
-      const total = this.detail.chapters.length;
-      const safeIndex = this.resumeIndex >= 0 && this.resumeIndex < total ? this.resumeIndex : 0;
-      this.progressHint = `上次读到 ${this.detail.chapters[safeIndex].title}`;
-    }
-    this.chapterWindow = Math.max(CHAPTER_WINDOW_STEP, Math.min(this.resumeIndex + 20,
+    this.chapterWindow = Math.max(CHAPTER_WINDOW_STEP, Math.min(CHAPTER_WINDOW_STEP,
       (this.detail === null ? 0 : this.detail.chapters.length)));
+    this.refreshProgress();
+  }
+
+  /** 重新读取阅读进度，并同步「上次读到」与当前章高亮 */
+  private refreshProgress(): void {
+    if (this.detail === null) {
+      return;
+    }
+    const total = this.detail.chapters.length;
+    const progress: ReadProgress | null = Library.get().progress(this.params.sourceId, this.params.comicId);
+    if (progress === null) {
+      this.resumeIndex = 0;
+      this.progressHint = '';
+      return;
+    }
+    const rawIndex = progress.chapterIndex;
+    const safeIndex = rawIndex >= 0 && rawIndex < total ? rawIndex : 0;
+    this.resumeIndex = safeIndex;
+    this.progressHint = `上次读到 ${this.detail.chapters[safeIndex].title}`;
+    this.ensureChapterVisible(safeIndex);
+  }
+
+  /** 目录按当前排序显示；只翻转副本，绝不改动原始 chapters 顺序 */
+  private orderedChapters(): ChapterBrief[] {
+    if (this.detail === null) {
+      return [];
+    }
+    const items: ChapterBrief[] = this.detail.chapters.slice();
+    if (this.chapterDescending) {
+      items.reverse();
+    }
+    return items;
+  }
+
+  /** 正序时把当前章纳入已展开窗口；倒序时当前章靠后，强行展开会一次性铺完整个列表 */
+  private ensureChapterVisible(index: number): void {
+    if (this.detail === null || this.chapterDescending) {
+      return;
+    }
+    const position = index;
+    if (this.chapterWindow < position + 1) {
+      this.chapterWindow = position + 1;
+    }
+  }
+
+  private toggleChapterOrder(): void {
+    const next = !this.chapterDescending;
+    this.chapterDescending = next;
+    Library.get().setChapterDescending(next);
+    if (next) {
+      // 切到倒序：只保留一个窗口，避免上千章一次铺开
+      this.chapterWindow = Math.max(CHAPTER_WINDOW_STEP,
+        Math.min(CHAPTER_WINDOW_STEP, this.detail === null ? 0 : this.detail.chapters.length));
+      return;
+    }
+    this.ensureChapterVisible(this.resumeIndex);
   }
 
   private openReader(index: number): void {
@@ -395,6 +455,17 @@ struct DetailPage {
           .fontColor(Theme.text)
           .margin({ left: 8 })
         Blank()
+        Text(this.chapterDescending ? '倒序 ↓' : '正序 ↑')
+          .fontSize(Theme.fsLabel)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Theme.accent)
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .backgroundColor(Theme.accentDim)
+          .borderRadius(Theme.radiusPill)
+          .margin({ right: Theme.gapM })
+          .onClick(() => {
+            this.toggleChapterOrder();
+          })
         Text(`${this.detail!.chapters.length} 话`)
           .fontSize(Theme.fsCaption)
           .fontColor(Theme.textDim)
@@ -402,7 +473,7 @@ struct DetailPage {
       .width('100%')
       .padding({ bottom: Theme.gapM })
 
-      ForEach(this.chapterRows(this.detail!.chapters), (row: ChapterBrief[]) => {
+      ForEach(this.chapterRows(this.orderedChapters()), (row: ChapterBrief[]) => {
         Row() {
           ForEach(row, (chapter: ChapterBrief) => {
             Text(chapter.title)
@@ -428,7 +499,14 @@ struct DetailPage {
         .width('100%')
         .justifyContent(FlexAlign.SpaceBetween)
         .margin({ bottom: Theme.gapS })
-      }, (row: ChapterBrief[], index: number) => `crow_${index}_${row.length}`)
+      }, (row: ChapterBrief[], index: number) => {
+        // 行 key 必须带上该行首章：倒序后行数不变，只靠 index 的话 ForEach
+        // 认为 key 没变化，界面不会真正重排
+        if (row.length === 0) {
+          return `crow_${index}_empty`;
+        }
+        return `crow_${row[0].chapterId}_${row[0].index}_${row.length}`;
+      })
 
       if (this.chapterWindow < this.detail!.chapters.length) {
         Text(`显示更多（${this.chapterWindow} / ${this.detail!.chapters.length}）`)

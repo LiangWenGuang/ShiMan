@@ -66,6 +66,13 @@ export class ReadProgress {
   comicId: string = '';
   title: string = '';
   cover: string = '';
+  /**
+   * 详情页绝对地址。必须存 —— 从书架「继续阅读」直接进阅读器时，
+   * 没有它就只剩 `baseUrl + '/' + comicId` 这种兜底拼接，
+   * 而各站详情路径差异极大（云北 `/index.php/comic/{slug}`、
+   * 206 `/comic_{id}.html`），拼出来必然是 404。
+   */
+  url: string = '';
   chapterId: string = '';
   chapterIndex: number = 0;
   chapterTitle: string = '';

@@ -7,7 +7,7 @@ import { SourceRule, BrowseRule } from '../rule/Rules';
 import { Http, HttpResponse, HttpHeader, defaultHeaders } from '../net/Http';
 import {
   parseListItems, parseDetailFields, parseChapters,
-  parseImagesFromJson, parseImagesFromHtml, parseImagesFromRegex, UrlVars,
+  parseImagesFromJson, parseImagesFromHtml, parseImagesFromRegex, parseImagesFromSequence, UrlVars,
   readEmbeddedJson, parseChaptersFromJson
 } from '../rule/Engine';
 import { parseHtml, HtmlDocument } from '../parse/Html';
@@ -133,11 +133,13 @@ export class SourceApi {
             .set('id', comicId)
             .set('url', url)
             .apply(rule.chapters.json.url);
-          const jsonResponse = await Http.get(
-            resolveUrl(rule.baseUrl, jsonUrl), buildHeaders(rule, url), rule.charset);
+          const targetJsonUrl = resolveUrl(rule.baseUrl, jsonUrl);
+          const jsonResponse = rule.chapters.json.method === 'post'
+            ? await Http.post(targetJsonUrl, buildHeaders(rule, url), rule.charset, rule.chapters.json.body)
+            : await Http.get(targetJsonUrl, buildHeaders(rule, url), rule.charset);
           if (jsonResponse.ok) {
             const base = rule.chapters.json.baseUrl.length > 0
-              ? rule.chapters.json.baseUrl : resolveUrl(rule.baseUrl, jsonUrl);
+              ? rule.chapters.json.baseUrl : targetJsonUrl;
             detail.chapters = parseChaptersFromJson(jsonResponse.body, rule, base);
           }
         }
@@ -208,6 +210,8 @@ export class SourceApi {
         result.images = parseImagesFromHtml(response.body, rule, target);
       } else if (rule.images.type === 'regex') {
         result.images = parseImagesFromRegex(response.body, rule, chapter.url);
+      } else if (rule.images.type === 'sequence') {
+        result.images = parseImagesFromSequence(response.body, rule, chapter.url);
       } else {
         result.images = parseImagesFromJson(response.body, rule, chapter.url);
       }
