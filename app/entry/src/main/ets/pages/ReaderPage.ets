@@ -17,6 +17,13 @@ const TEXT_MAIN: string = Theme.text;
 const TEXT_SUB: string = Theme.textSub;
 const ACCENT: string = Theme.accent;
 
+/** 跨源续读：书名命中的接管结果 */
+class HealResult {
+  rule: SourceRule = new SourceRule();
+  comicId: string = '';
+  url: string = '';
+}
+
 @Entry
 @Component
 struct ReaderPage {
@@ -53,21 +60,51 @@ struct ReaderPage {
   private catalogScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
-    const raw = router.getParams() as ReaderParams;
+    // router.getParams() 返回的是普通对象，ArkTS 下直接 `as ReaderParams` 强转后
+    // 字段可能因为序列化丢失类型；逐个取并兜底，避免继续阅读因为参数错乱直接崩。
+    const raw = router.getParams();
     if (raw !== undefined && raw !== null) {
-      this.params = raw;
+      const p = raw as Record<string, Object>;
+      const safe = new ReaderParams();
+      safe.sourceId = this.asString(p['sourceId']);
+      safe.comicId = this.asString(p['comicId']);
+      safe.comicUrl = this.asString(p['comicUrl']);
+      const ci = p['chapterIndex'];
+      safe.chapterIndex = typeof ci === 'number' ? ci : (parseInt(this.asString(ci), 10) || 0);
+      safe.chapterId = this.asString(p['chapterId']);
+      this.params = safe;
     }
+    Trace.write('reader', 'enter source=' + this.params.sourceId +
+      ' comicId=' + this.params.comicId + ' bookmarked=' + (this.params.comicUrl.length > 0) +
+      ' chapter=' + this.params.chapterIndex + ' chapterId=' + this.params.chapterId);
     this.chapterDescending = Library.get().isChapterDescending();
     this.bootstrap();
   }
 
+  private asString(value: Object | undefined): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    return String(value);
+  }
+
   private async bootstrap(): Promise<void> {
     const registry = SourceRegistry.get();
-    const rule: SourceRule | null = registry.find(this.params.sourceId);
+    let rule: SourceRule | null = registry.find(this.params.sourceId);
     if (rule === null) {
-      this.loading = false;
-      this.error = '图源不存在';
-      return;
+      // 源可能被重命名/移除（多次迭代后，历史里记的 sourceId 会失效）。
+      // 用存下的书名在所有启用源里搜一次，命中就接管，让「继续阅读」不至于直接报错。
+      Trace.write('reader', 'source missing, try heal by title: ' + this.params.sourceId);
+      const healed = await this.healByTitleAcrossSources();
+      if (healed === null) {
+        this.loading = false;
+        this.error = '找不到对应的图源，可能已被移除';
+        return;
+      }
+      rule = healed.rule;
+      this.params.sourceId = healed.rule.id;
+      this.params.comicId = healed.comicId;
+      this.params.comicUrl = healed.url;
     }
     // 从书架/历史直接进阅读器时没有带详情地址，必须自己找回来，
     // 否则只剩 baseUrl+id 的兜底拼接，各站路径不同 -> 必然 404
@@ -114,9 +151,41 @@ struct ReaderPage {
     await this.loadChapter(start);
   }
 
-  /** 详情地址未知时，用书名回源站搜一次，返回最匹配的详情地址 */
-  private async healUrlByTitle(rule: SourceRule): Promise<string> {
+  /**
+   * 当存下来的 sourceId 已失效（源被改名/移除）时，用书名在所有启用源里搜一遍，
+   * 命中同名/包含的书就接管它的 rule、comicId 和详情地址，让「继续阅读」能续上。
+   */
+  private async healByTitleAcrossSources(): Promise<HealResult | null> {
     const progress = Library.get().progress(this.params.sourceId, this.params.comicId);
+    const title = progress === null ? '' : progress.title;
+    if (title.length === 0) {
+      return null;
+    }
+    const sources = SourceRegistry.get().enabled();
+    for (let s = 0; s < sources.length; s++) {
+      const r = sources[s];
+      const outcome = await SourceApi.search(r, title, 1);
+      if (!outcome.ok || outcome.value === undefined) {
+        continue;
+      }
+      const items = outcome.value;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.url.length > 0 && (item.title === title || item.title.indexOf(title) >= 0)) {
+          Trace.write('reader', 'healed across sources: ' + r.id + ' -> ' + item.url);
+          const result = new HealResult();
+          result.rule = r;
+          result.comicId = item.comicId;
+          result.url = item.url;
+          return result;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** 详情地址未知时，用书名回源站搜一次，返回最匹配的详情地址 */
+  private async healUrlByTitle(rule: SourceRule): Promise<string> {    const progress = Library.get().progress(this.params.sourceId, this.params.comicId);
     const title = progress === null ? '' : progress.title;
     if (title.length === 0) {
       return '';
@@ -385,7 +454,9 @@ struct ReaderPage {
           .fontColor(TEXT_MAIN)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.detail === null ? '' : this.detail.chapters[this.chapterIndex].title)
+        Text(this.detail === null || this.chapterIndex < 0 ||
+          this.chapterIndex >= this.detail.chapters.length
+          ? '' : this.detail.chapters[this.chapterIndex].title)
           .fontSize(Theme.fsCaption)
           .fontColor(TEXT_SUB)
           .maxLines(1)

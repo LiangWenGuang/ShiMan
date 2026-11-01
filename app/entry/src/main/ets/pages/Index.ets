@@ -34,6 +34,8 @@ struct Index {
   @State searchLoading: boolean = false;
   @State searchError: string = '';
   @State searchDone: boolean = false;
+  @State searchHistoryShown: boolean = false;
+  @State searchHistoryItems: string[] = [];
 
   // 书架 / 收藏
   @State shelf: ShelfItem[] = [];
@@ -111,6 +113,9 @@ struct Index {
       promptAction.showToast({ message: '先输入关键词' });
       return;
     }
+    // 记录搜索历史
+    Library.get().addSearchHistory(kw);
+    this.searchHistoryShown = false;
     this.searchLoading = true;
     this.searchError = '';
     this.searchDone = false;
@@ -399,7 +404,7 @@ struct Index {
   }
 
   @Builder
-  comicGrid(items: ComicBrief[]) {
+  comicGrid(items: ComicBrief[], showSource: boolean = false) {
     ForEach(this.rows(items), (row: ComicBrief[]) => {
       Row() {
         ForEach(row, (item: ComicBrief) => {
@@ -409,6 +414,7 @@ struct Index {
               cover: item.cover,
               subtitle: item.latest,
               referer: this.refererOf(item.sourceId),
+              sourceTag: showSource ? this.sourceNameOf(item.sourceId) : '',
               starred: this.isFavorite(item.sourceId, item.comicId),
               onTap: () => {
                 this.openDetail(item);
@@ -431,6 +437,12 @@ struct Index {
       .alignItems(VerticalAlign.Top)
       .margin({ bottom: 18 })
     }, (row: ComicBrief[], index: number) => `row_${index}_${row.length}`)
+  }
+
+  /** 图源显示名；找不到就用 sourceId 兜底，避免空标签 */
+  private sourceNameOf(sourceId: string): string {
+    const rule = SourceRegistry.get().find(sourceId);
+    return rule === null ? sourceId : rule.name;
   }
 
   @Builder
@@ -509,6 +521,10 @@ struct Index {
           .onSubmit(() => {
             this.doSearch();
           })
+          .onFocus(() => {
+            this.searchHistoryItems = Library.get().searchHistory().slice(0, 10);
+            this.searchHistoryShown = true;
+          })
       }
       .height(46)
       .layoutWeight(1)
@@ -545,7 +561,29 @@ struct Index {
         .borderRadius(Theme.radiusPill)
       }
       .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
+
+      if (!this.searchAll) {
+        Row() {
+          Text(this.currentSourceName)
+            .fontSize(Theme.fsCaption)
+            .fontColor(Theme.textSub)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          SymbolGlyph($r('sys.symbol.chevron_down'))
+            .fontSize(11)
+            .fontColor([Theme.textDim])
+            .margin({ left: 5 })
+        }
+        .padding({ left: 12, right: 10, top: 5, bottom: 5 })
+        .backgroundColor(Theme.surface)
+        .borderRadius(Theme.radiusPill)
+        .margin({ left: Theme.gapS })
+        .onClick(() => {
+          this.pickCurrentSource();
+        })
+      }
+
+      Blank()
 
       Text(this.searchAll ? `${this.sources.length} 个源参与` : '单源检索')
         .fontSize(Theme.fsCaption)
@@ -555,13 +593,121 @@ struct Index {
     .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapM })
   }
 
+  /** 弹源列表，切当前检索源 */
+  private pickCurrentSource(): void {
+    const registry = SourceRegistry.get();
+    const list = registry.enabled();
+    const sheets: SheetInfo[] = [];
+    for (let i = 0; i < list.length; i++) {
+      const rule = list[i];
+      const title = rule.id === this.currentSourceId ? `✓ ${rule.name}` : rule.name;
+      sheets.push({
+        title: title,
+        action: () => {
+          this.switchCurrentSource(rule.id);
+        }
+      });
+    }
+    if (sheets.length === 0) {
+      return;
+    }
+    ActionSheet.show({
+      title: '选择当前检索图源',
+      message: '仅对「仅当前源」的搜索与发现页生效',
+      sheets: sheets,
+      cancel: () => {
+      }
+    });
+  }
+
+  private async switchCurrentSource(id: string): Promise<void> {
+    await SourceRegistry.get().setCurrent(id);
+    this.refreshSources();
+    // 切了源，发现页要跟着换
+    if (this.currentSourceId.length > 0) {
+      this.loadDiscover(0);
+    }
+    promptAction.showToast({ message: `已切换到 ${this.currentSourceName}` });
+  }
+
+  /** 点历史项：回填关键词并搜索 */
+  private searchFromHistory(kw: string): void {
+    this.keyword = kw;
+    this.searchHistoryShown = false;
+    this.doSearch();
+  }
+
+  @Builder
+  searchHistoryPanel() {
+    Column() {
+      Row() {
+        Text('搜索历史')
+          .fontSize(Theme.fsHeadline)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Theme.text)
+        Blank()
+        Text('清空')
+          .fontSize(Theme.fsCaption)
+          .fontColor(Theme.textDim)
+          .onClick(() => {
+            Library.get().clearSearchHistory();
+            this.searchHistoryItems = [];
+            this.searchHistoryShown = false;
+          })
+      }
+      .width('100%')
+      .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapL, bottom: Theme.gapS })
+
+      List() {
+        ForEach(this.searchHistoryItems, (item: string) => {
+          ListItem() {
+            Row() {
+              SymbolGlyph($r('sys.symbol.magnifyingglass'))
+                .fontSize(14)
+                .fontColor([Theme.textDim])
+              Text(item)
+                .fontSize(Theme.fsBody)
+                .fontColor(Theme.text)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+                .margin({ left: Theme.gapM })
+              SymbolGlyph($r('sys.symbol.xmark'))
+                .fontSize(14)
+                .fontColor([Theme.textDim])
+                .padding(6)
+                .onClick(() => {
+                  Library.get().removeSearchHistory(item);
+                  this.searchHistoryItems = Library.get().searchHistory().slice(0, 10);
+                })
+            }
+            .width('100%')
+            .height(48)
+            .padding({ left: Theme.gapL, right: Theme.gapL })
+            .onClick(() => {
+              this.searchFromHistory(item);
+            })
+          }
+        }, (item: string) => `sh_${item}`)
+      }
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .backgroundColor(Theme.bg)
+  }
+
   @Builder
   searchTab() {
     Column() {
       this.searchBar()
       this.scopeRow()
 
-      if (this.searchLoading) {
+      if (this.searchHistoryShown && this.searchHistoryItems.length > 0) {
+        this.searchHistoryPanel()
+      } else if (this.searchLoading) {
         this.loadingBlock('正在各源检索…')
       } else if (this.searchResults.length === 0) {
         if (this.searchDone && this.searchError.length > 0) {
@@ -598,7 +744,7 @@ struct Index {
           }
           ListItem() {
             Column() {
-              this.comicGrid(this.searchResults)
+              this.comicGrid(this.searchResults, true)
             }
             .padding({ left: Theme.gapM, right: Theme.gapM })
           }
@@ -907,7 +1053,7 @@ struct Index {
         .backgroundColor(Theme.surface)
         .borderRadius(Theme.radiusL)
 
-        Text('拾漫 1.0.0')
+        Text('拾漫 1.0.2')
           .fontSize(Theme.fsMicro)
           .fontColor(Theme.textDim)
           .margin({ top: Theme.gapXl + 8, bottom: 28 })

@@ -147,6 +147,17 @@ export class ImageRule {
   template: string = '';
   /** sequence 模式没匹配到数量时的兜底上限，避免产出 0 张 */
   maxCount: number = 300;
+  /**
+   * aes 模式：正文图是「页面里一段 base64 密文，AES 解密后得到图片数组」。
+   * 典型是爱国漫/国漫网这类站：params='密文' + 固定密钥，CBC 解密出 JSON。
+   */
+  aesKey: string = '';
+  /** aes 模式：提取密文的正则（有捕获组取第 1 组） */
+  aesPattern: string = '';
+  /** aes 模式：IV 来源。cipher16 = 取密文前 16 字符；留空 = ECB 无 IV */
+  aesIvSource: string = '';
+  /** aes 模式：解密后从明文里提取图片数组的正则（如 "images":\[(.*?)\]） */
+  aesListPattern: string = '';
 }
 
 export class SourceRule {
@@ -291,6 +302,10 @@ export function ruleFromJson(root: JsonNode): SourceRule {
     target.countPattern = str(images, 'countPattern', '');
     target.template = str(images, 'template', '');
     target.maxCount = num(images, 'maxCount', 300);
+    target.aesKey = str(images, 'aesKey', '');
+    target.aesPattern = str(images, 'aesPattern', '');
+    target.aesIvSource = str(images, 'aesIvSource', '');
+    target.aesListPattern = str(images, 'aesListPattern', '');
   }
 
   const browse = root.get('browse');

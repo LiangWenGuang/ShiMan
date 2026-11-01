@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 #  一键构建「漫屿」鸿蒙安装包
 #
 #  用法（在本目录打开 PowerShell）:
@@ -53,9 +53,15 @@ $buildLog = Join-Path $logDir ('build-' + $stamp + '.log')
 # hvigor 的 clean 会批量删除产物，撞上「批量删除需确认」保护会误报失败
 $prevBulk = $env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD
 $env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD = '1000000'
+# 关键：hvigor 会把 WARN 写到 stderr，而 PowerShell 5.1 在 $ErrorActionPreference
+# = 'Stop' 下会把原生命令的 stderr 当成 RemoteException 直接中断脚本（即便编译成功）。
+# 这里把 hvigor 调用段的错误偏好临时改为 Continue，只靠 $LASTEXITCODE 判定成败。
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 & $hvigor --mode module -p product=default -p module=entry@default -p buildMode=debug assembleHap --no-daemon 2>&1 |
   Out-File -Encoding UTF8 $buildLog
 $code = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
 if ($null -eq $prevBulk) { Remove-Item Env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD -ErrorAction SilentlyContinue }
 else { $env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD = $prevBulk }
 if ($code -ne 0) {
@@ -66,7 +72,14 @@ if ($code -ne 0) {
 
 $src = Join-Path $app 'entry\build\default\outputs\default\entry-default-unsigned.hap'
 if (!(Test-Path -LiteralPath $src)) { Fail '编译通过但找不到 HAP 产物' }
-$dst = Join-Path $hapDir ('manyu-1.0.0-unsigned-' + $stamp + '.hap')
+# 版本号从 app.json5 的 versionName 读取，保证产物名与真实版本一致
+$appJson5 = Join-Path $app 'AppScope\app.json5'
+$verName = '1.0.0'
+if (Test-Path -LiteralPath $appJson5) {
+  $m = Select-String -LiteralPath $appJson5 -Pattern '"versionName"\s*:\s*"([^"]+)"'
+  if ($null -ne $m -and $m.Matches.Count -gt 0) { $verName = $m.Matches[0].Groups[1].Value }
+}
+$dst = Join-Path $hapDir ('manyu-' + $verName + '-unsigned-' + $stamp + '.hap')
 Copy-Item -LiteralPath $src -Destination $dst -Force
 Ok ('HAP: ' + $dst)
 Ok ('体积: ' + [math]::Round((Get-Item -LiteralPath $dst).Length / 1KB, 1) + ' KB')

@@ -1,0 +1,54 @@
+{
+  "id": "mitui",
+  "name": "咪兔漫画",
+  "baseUrl": "https://www.imitui.com",
+  "charset": "utf-8",
+  "note": "逆推自 MyComic（imitui.com）；搜索在 m. 子域、详情/目录在 www.；正文图由页面脚本从 chapterImages 数组拼出，用无头取图兜底",
+  "headers": [
+    { "name": "Referer", "value": "https://www.imitui.com/" }
+  ],
+  "search": {
+    "url": "https://m.imitui.com/search/?keywords={kw}",
+    "list": "div.itemBox",
+    "id": "",
+    "title": "a.title@text",
+    "cover": "img@attr:src",
+    "link": "a.title@attr:href",
+    "author": "p.txtItme@text",
+    "latest": "span.date@text"
+  },
+  "detail": {
+    "title": "div#comicName@text",
+    "cover": "div#Cover img@attr:src",
+    "author": "p.txtItme@text",
+    "desc": "p#full-des@text||p#simple-des@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "ul#chapter-list-1 li",
+    "id": "",
+    "title": "span@text",
+    "link": "a@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "img",
+    "extract": "attr:src",
+    "settleMs": 2200
+  },
+  "browse": [
+    {
+      "name": "人气排行",
+      "url": "https://m.imitui.com/rank/popularity/?page=1",
+      "list": "div.itemBox",
+      "title": "a.title@text",
+      "cover": "img@attr:src",
+      "link": "a.title@attr:href",
+      "author": "p.txtItme@text",
+      "latest": "span.date@text"
+    }
+  ]
+}

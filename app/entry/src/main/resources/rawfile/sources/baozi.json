@@ -1,0 +1,51 @@
+{
+  "id": "baozi",
+  "name": "包子漫画",
+  "baseUrl": "https://cn.baozimh.com",
+  "charset": "utf-8",
+  "note": "逆推自 MyComic（baozimh.com）；搜索/详情/目录/正文全是纯 HTML（AMP 页面），无 JS 依赖，打开即出图",
+  "headers": [
+    { "name": "Referer", "value": "https://cn.baozimh.com/" }
+  ],
+  "search": {
+    "url": "/search?q={kw}",
+    "list": "div.comics-card",
+    "id": "",
+    "title": "a@attr:title||a@text",
+    "cover": "amp-img@attr:src",
+    "link": "a@attr:href",
+    "author": "a.comics-card__info small@text",
+    "latest": ""
+  },
+  "detail": {
+    "title": "h1.comics-detail__title@text",
+    "cover": "div.de-info__box amp-img@attr:src",
+    "author": "h2.comics-detail__author@text",
+    "desc": "p.comics-detail__desc@text",
+    "status": "div.tag-list span@text",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "div.comics-chapters",
+    "id": "",
+    "title": "span@text",
+    "link": "a@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "html",
+    "url": "{chapterUrl}",
+    "list": "ul.comic-contain amp-img",
+    "field": "@attr:src"
+  },
+  "browse": [
+    {
+      "name": "首页推荐",
+      "url": "/",
+      "list": "div.comics-card",
+      "title": "a@attr:title||a@text",
+      "cover": "amp-img@attr:src",
+      "link": "a@attr:href"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "id": "dmla",
+  "name": "动漫啦",
+  "baseUrl": "https://www.dongman.la",
+  "charset": "utf-8",
+  "note": "正文图 data-src 懒加载，纯 HTTP 直取，稳定",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.dongman.la/"
+    }
+  ],
+  "search": {
+    "url": "/manhua/so/{kw}/",
+    "list": "ul.divide-y li",
+    "id": "",
+    "title": "h2 a@text",
+    "cover": "img@attr:src",
+    "link": "a@attr:href",
+    "author": "",
+    "latest": "a@text"
+  },
+  "detail": {
+    "title": "h1@text",
+    "cover": "div.detail-cover img@attr:src",
+    "author": "p.detail-meta a@text",
+    "desc": "div.detail-description p@text",
+    "status": "span.status-pill@text",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "#chapterList a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href",
+    "reverse": true
+  },
+  "images": {
+    "type": "html",
+    "url": "{chapterUrl}",
+    "list": "img.lazy-image.reader-img",
+    "field": "@attr:data-src"
+  },
+  "browse": [
+    {
+      "name": "少年热血",
+      "url": "/manhua/node/2/",
+      "list": "ul.divide-y li",
+      "title": "h2 a@text",
+      "cover": "img@attr:src",
+      "link": "a@attr:href"
+    }
+  ]
+}

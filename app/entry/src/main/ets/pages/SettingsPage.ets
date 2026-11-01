@@ -116,7 +116,7 @@ struct SettingsPage {
 
           this.sectionLabel('关于')
           Column() {
-            this.para('拾漫 1.0.0')
+            this.para('拾漫 1.0.2')
             Text('纯 ArkTS 原生实现 · 无广告 · 无登录 · 无数据上传')
               .fontSize(Theme.fsCaption)
               .fontColor(Theme.textDim)

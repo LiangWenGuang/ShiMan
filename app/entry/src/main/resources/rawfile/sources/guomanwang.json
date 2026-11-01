@@ -1,0 +1,56 @@
+{
+  "id": "guomanwang",
+  "name": "国漫网",
+  "baseUrl": "https://www.guomanwang.com",
+  "charset": "utf-8",
+  "note": "正文图 AES-CBC 加密（params 密文 + 密钥），与爱国漫同密钥",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.guomanwang.com/"
+    }
+  ],
+  "search": {
+    "url": "/search?key={kw}",
+    "list": "li.stui-vodlist__item",
+    "id": "",
+    "title": "a.stui-vodlist__thumb@attr:title",
+    "cover": "a.stui-vodlist__thumb@attr:data-original",
+    "link": "a.stui-vodlist__thumb@attr:href",
+    "author": "",
+    "latest": "span.pic-text@text"
+  },
+  "detail": {
+    "title": "h3.title@text",
+    "cover": "img.img-responsive@attr:data-original",
+    "author": "div.stui-content__detail p@text",
+    "desc": "div.stui-content__desc@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "ul.stui-content__playlist li a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "aes",
+    "url": "{chapterUrl}",
+    "aesKey": "9S8$vJnU2ANeSRoF",
+    "aesPattern": "params = '(.*?)';",
+    "aesIvSource": "cipher16",
+    "aesListPattern": "\"images\":\\[(.*?)\\]"
+  },
+  "browse": [
+    {
+      "name": "全部漫画",
+      "url": "/list/",
+      "list": "li.stui-vodlist__item",
+      "title": "a.stui-vodlist__thumb@attr:title",
+      "cover": "a.stui-vodlist__thumb@attr:data-original",
+      "link": "a.stui-vodlist__thumb@attr:href"
+    }
+  ]
+}

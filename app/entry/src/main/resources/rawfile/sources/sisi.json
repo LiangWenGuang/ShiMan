@@ -1,0 +1,52 @@
+{
+  "id": "sisi",
+  "name": "丝丝漫画",
+  "baseUrl": "https://m.sisimanhua.com",
+  "charset": "utf-8",
+  "note": "逆推自 MyComic（sisimanhua.com）；搜索/详情/目录纯 HTML，正文图为 view/{id}/{n}.webp 序号地址，用无头取图兜底",
+  "headers": [
+    { "name": "Referer", "value": "https://m.sisimanhua.com/" }
+  ],
+  "search": {
+    "url": "/search/?keywords={kw}",
+    "list": "div.itemBox",
+    "id": "",
+    "title": "a.title@text",
+    "cover": "mip-img@attr:src||img@attr:src",
+    "link": "a.title@attr:href",
+    "author": "p.txtItme@text",
+    "latest": "span.date@text"
+  },
+  "detail": {
+    "title": "div#Cover mip-img@attr:alt||h1@text",
+    "cover": "div#Cover mip-img@attr:src||div#Cover img@attr:src",
+    "author": "div.pic dl dd@text",
+    "desc": "p.txtDesc@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "ul#chapter-list-1 li",
+    "id": "",
+    "title": "span@text",
+    "link": "a@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "img",
+    "extract": "attr:src",
+    "settleMs": 2200
+  },
+  "browse": [
+    {
+      "name": "首页",
+      "url": "/",
+      "list": "div.itemBox",
+      "title": "a.title@text",
+      "cover": "mip-img@attr:src||img@attr:src",
+      "link": "a.title@attr:href"
+    }
+  ]
+}

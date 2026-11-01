@@ -11,6 +11,9 @@ import { JsonNode, JsonKind, parseJson, selectPath } from '../parse/Json';
 import { resolveUrl, decodeEntities, compact, extractNumericId, applyTemplate, toHttps } from '../util/Text';
 import { ComicBrief, ChapterBrief, PageImage } from '../model/Models';
 import { SourceRule, HeaderPair } from './Rules';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { buffer } from '@kit.ArkTS';
+import { util } from '@kit.ArkTS';
 
 /** 模板变量表 */
 export class UrlVars {
@@ -491,7 +494,8 @@ function firstCapture(text: string, pattern: string): string {  let regex: RegEx
 }
 
 /** 正则类源的图片解析：从原始 HTML 里直接抠地址 */
-export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: string): PageImage[] {  const images: PageImage[] = [];
+export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: string): PageImage[] {
+  const images: PageImage[] = [];
   if (rule.images.pattern.length === 0) {
     return images;
   }
@@ -513,13 +517,18 @@ export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: st
     if (raw === undefined) {
       raw = '';
     }
-    const url = raw.trim();
-    if (url.length > 0 && seen.indexOf(url) < 0) {
-      seen.push(url);
-      const image = new PageImage();
-      image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
-      image.referer = pageUrl;
-      images.push(image);
+    // 捕获到的可能是一个 URL，也可能是「一串 URL 连在一起」（如
+    // current_chapter:{...chapter_img_list:["url1","url2",...]} 这种内联数组），
+    // 这里统一拆开，逐个去重入列。
+    for (let u = 0; u < splitUrls(raw).length; u++) {
+      const url = splitUrls(raw)[u];
+      if (url.length > 0 && seen.indexOf(url) < 0) {
+        seen.push(url);
+        const image = new PageImage();
+        image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
+        image.referer = pageUrl;
+        images.push(image);
+      }
     }
     // 零长度匹配保护：否则 exec 会原地打转
     if (match.index === regex.lastIndex) {
@@ -528,6 +537,30 @@ export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: st
     match = regex.exec(html);
   }
   return images;
+}
+
+/** 把「可能是多个 URL 拼在一起」的捕获串拆成独立 URL 列表 */
+function splitUrls(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+  // 内联数组形如 `"url1","url2",...`，直接按引号拆；
+  // 拆出来的每一段里只要以 http(s):// 或 // 开头，就当作一个 URL。
+  const pieces = trimmed.split('"');
+  const out: string[] = [];
+  for (let i = 0; i < pieces.length; i++) {
+    const piece = pieces[i].trim();
+    if (piece.indexOf('http://') === 0 || piece.indexOf('https://') === 0 ||
+      piece.indexOf('//') === 0) {
+      out.push(piece);
+    }
+  }
+  // 没拆出多个（比如单条 URL 或其它形态），按原串兜底
+  if (out.length === 0) {
+    out.push(trimmed);
+  }
+  return out;
 }
 
 /** 从页面里找出所有疑似图片地址（web 模式的兜底） */
@@ -547,6 +580,96 @@ export function guessImages(html: string, pageUrl: string): PageImage[] {
     if (images.length > 0 && images[images.length - 1].url === url) {
       continue;
     }
+    const image = new PageImage();
+    image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
+    image.referer = pageUrl;
+    images.push(image);
+  }
+  return images;
+}
+
+/**
+ * AES-CBC 解密（针对爱国漫/国漫网这类站）。
+ * 密文是 base64，密钥固定，CBC 模式的 IV 取密文前 16 字符的 UTF-8 字节。
+ */
+export async function decryptAesCbc(cipherBase64: string, key: string, ivText: string): Promise<string> {
+  try {
+    const base64Helper = new util.Base64Helper();
+    const cipherBytes: Uint8Array = base64Helper.decodeSync(cipherBase64);
+
+    const keyBytes: Uint8Array = new Uint8Array(buffer.from(key, 'utf-8').buffer);
+    const symKeyBlob: cryptoFramework.DataBlob = { data: keyBytes };
+    const keyGenerator = cryptoFramework.createSymKeyGenerator('AES128');
+    const symKey = await keyGenerator.convertKey(symKeyBlob);
+
+    const ivBytes: Uint8Array = new Uint8Array(buffer.from(ivText, 'utf-8').buffer);
+    const ivParams: cryptoFramework.IvParamsSpec = {
+      algName: 'IvParamsSpec',
+      iv: { data: ivBytes }
+    };
+
+    const cipher = cryptoFramework.createCipher('AES128|CBC|PKCS5');
+    await cipher.init(cryptoFramework.CryptoMode.DECRYPT_MODE, symKey, ivParams);
+    const plainData: cryptoFramework.DataBlob = await cipher.doFinal({ data: cipherBytes });
+    const plainBytes = new Uint8Array(plainData.data);
+    return buffer.from(plainBytes.buffer).toString('utf-8');
+  } catch (error) {
+    return '';
+  }
+}
+
+/** 取正则第一个捕获组（无捕获组取整个匹配） */
+function firstCaptureOf(text: string, pattern: string): string {
+  try {
+    const regex = new RegExp(pattern);
+    const match = regex.exec(text);
+    if (match === null) {
+      return '';
+    }
+    const value = match.length > 1 ? match[1] : match[0];
+    return value === undefined ? '' : value;
+  } catch (error) {
+    return '';
+  }
+}
+
+/**
+ * aes 模式的图片解析：页面里有一段 base64 密文，AES 解密后是含图片数组的 JSON。
+ * 流程：正则提取密文 → AES-CBC 解密 → 正则提取图片数组 → 按引号拆成 URL 列表。
+ */
+export async function parseImagesFromAes(html: string, rule: SourceRule, pageUrl: string): Promise<PageImage[]> {
+  const images: PageImage[] = [];
+  if (rule.images.aesKey.length === 0 || rule.images.aesPattern.length === 0) {
+    return images;
+  }
+  const cipherText = firstCaptureOf(html, rule.images.aesPattern).trim();
+  if (cipherText.length === 0) {
+    return images;
+  }
+  // IV 来源：默认取密文前 16 字符
+  const ivText = rule.images.aesIvSource === 'cipher16' ? cipherText.substring(0, 16) : '';
+  const plain = await decryptAesCbc(cipherText, rule.images.aesKey, ivText);
+  if (plain.length === 0) {
+    return images;
+  }
+  // 从解密后的明文里提取图片数组
+  let raw = plain;
+  if (rule.images.aesListPattern.length > 0) {
+    const matched = firstCaptureOf(plain, rule.images.aesListPattern);
+    if (matched.length > 0) {
+      raw = matched;
+    }
+  }
+  // 按引号拆出 URL（解密后的 JSON 里图片地址是 "..." 格式，可能带 \/ 转义）
+  const unescaped = raw.split('\\/').join('/');
+  const seen: string[] = [];
+  const urls = splitUrls(unescaped);
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    if (url.length === 0 || seen.indexOf(url) >= 0) {
+      continue;
+    }
+    seen.push(url);
     const image = new PageImage();
     image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
     image.referer = pageUrl;

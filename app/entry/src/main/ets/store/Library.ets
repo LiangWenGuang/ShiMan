@@ -15,6 +15,7 @@ const KEY_SHELF = 'shelf';
 const KEY_PROGRESS = 'progress';
 const KEY_FAVORITE = 'favorite';
 const KEY_CHAPTER_DESCENDING = 'chapter_descending';
+const KEY_SEARCH_HISTORY = 'search_history';
 
 function enc(value: string): string {
   return encodeURIComponent(value.length > 0 ? value : '');
@@ -37,6 +38,8 @@ export class Library {
   private progressItems: Map<string, ReadProgress> = new Map<string, ReadProgress>();
   /** 详情页与阅读器共用的目录展示顺序，不影响章节原始索引 */
   private chapterDescending: boolean = false;
+  /** 搜索历史（新在前，最多存 20 条，展示取前 10） */
+  private searchHistoryItems: string[] = [];
   private ready: boolean = false;
 
   static get(): Library {
@@ -70,6 +73,10 @@ export class Library {
       const chapterOrderRaw = await this.store.get(KEY_CHAPTER_DESCENDING, false);
       if (typeof chapterOrderRaw === 'boolean') {
         this.chapterDescending = chapterOrderRaw;
+      }
+      const historyRaw = await this.store.get(KEY_SEARCH_HISTORY, '');
+      if (typeof historyRaw === 'string' && historyRaw.length > 0) {
+        this.searchHistoryItems = this.decodeSearchHistory(historyRaw);
       }
     } catch (error) {
       // 读取失败按空库处理，不影响使用
@@ -342,6 +349,78 @@ export class Library {
       ].join('\t'));
     }
     this.store.put(KEY_PROGRESS, lines.join('\n')).then(() => {
+      if (this.store !== null) {
+        this.store.flush();
+      }
+    }).catch(() => {
+      // 忽略写入失败
+    });
+  }
+
+  // ─────────────────────────── 搜索历史 ───────────────────────────
+
+  private decodeSearchHistory(raw: string): string[] {
+    const out: string[] = [];
+    const parts = raw.split('\n');
+    for (let i = 0; i < parts.length; i++) {
+      const value = dec(parts[i]);
+      if (value.length > 0) {
+        out.push(value);
+      }
+    }
+    return out;
+  }
+
+  searchHistory(): string[] {
+    return this.searchHistoryItems.slice();
+  }
+
+  addSearchHistory(keyword: string): void {
+    const kw = keyword.trim();
+    if (kw.length === 0) {
+      return;
+    }
+    // 去重：已有则移到最前
+    const kept: string[] = [];
+    for (let i = 0; i < this.searchHistoryItems.length; i++) {
+      if (this.searchHistoryItems[i] !== kw) {
+        kept.push(this.searchHistoryItems[i]);
+      }
+    }
+    kept.unshift(kw);
+    // 最多存 20 条
+    while (kept.length > 20) {
+      kept.pop();
+    }
+    this.searchHistoryItems = kept;
+    this.persistSearchHistory();
+  }
+
+  removeSearchHistory(keyword: string): void {
+    const kept: string[] = [];
+    for (let i = 0; i < this.searchHistoryItems.length; i++) {
+      if (this.searchHistoryItems[i] !== keyword) {
+        kept.push(this.searchHistoryItems[i]);
+      }
+    }
+    this.searchHistoryItems = kept;
+    this.persistSearchHistory();
+  }
+
+  clearSearchHistory(): void {
+    this.searchHistoryItems = [];
+    this.persistSearchHistory();
+  }
+
+  private persistSearchHistory(): void {
+    if (this.store === null) {
+      return;
+    }
+    const lines: string[] = [];
+    for (let i = 0; i < this.searchHistoryItems.length; i++) {
+      lines.push(enc(this.searchHistoryItems[i]));
+    }
+    this.store.put(KEY_SEARCH_HISTORY, lines.join('\n')).then(() => {
       if (this.store !== null) {
         this.store.flush();
       }

@@ -147,6 +147,11 @@ export class ImageRule {
   template: string = '';
   /** sequence 模式没匹配到数量时的兜底上限，避免产出 0 张 */
   maxCount: number = 300;
+  /** aes 模式字段 */
+  aesKey: string = '';
+  aesPattern: string = '';
+  aesIvSource: string = '';
+  aesListPattern: string = '';
 }
 
 export class SourceRule {
@@ -291,6 +296,10 @@ export function ruleFromJson(root: JsonNode): SourceRule {
     target.countPattern = str(images, 'countPattern', '');
     target.template = str(images, 'template', '');
     target.maxCount = num(images, 'maxCount', 300);
+    target.aesKey = str(images, 'aesKey', '');
+    target.aesPattern = str(images, 'aesPattern', '');
+    target.aesIvSource = str(images, 'aesIvSource', '');
+    target.aesListPattern = str(images, 'aesListPattern', '');
   }
 
   const browse = root.get('browse');

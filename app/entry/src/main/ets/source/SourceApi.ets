@@ -8,7 +8,7 @@ import { Http, HttpResponse, HttpHeader, defaultHeaders } from '../net/Http';
 import {
   parseListItems, parseDetailFields, parseChapters,
   parseImagesFromJson, parseImagesFromHtml, parseImagesFromRegex, parseImagesFromSequence, UrlVars,
-  readEmbeddedJson, parseChaptersFromJson
+  readEmbeddedJson, parseChaptersFromJson, parseImagesFromAes
 } from '../rule/Engine';
 import { parseHtml, HtmlDocument } from '../parse/Html';
 import { Outcome, ComicBrief, ComicDetail, ChapterBrief, PageImage } from '../model/Models';
@@ -212,6 +212,8 @@ export class SourceApi {
         result.images = parseImagesFromRegex(response.body, rule, chapter.url);
       } else if (rule.images.type === 'sequence') {
         result.images = parseImagesFromSequence(response.body, rule, chapter.url);
+      } else if (rule.images.type === 'aes') {
+        result.images = await parseImagesFromAes(response.body, rule, chapter.url);
       } else {
         result.images = parseImagesFromJson(response.body, rule, chapter.url);
       }

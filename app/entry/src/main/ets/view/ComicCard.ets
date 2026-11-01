@@ -13,6 +13,8 @@ export struct ComicCard {
   subtitle: string = '';
   /** 封面下载时带的 Referer，用于绕过图源 CDN 的防盗链 */
   referer: string = '';
+  /** 数据来源名。非空时在标题上方显示一个小标签（搜索页用于区分来源） */
+  sourceTag: string = '';
   /** 已收藏时在封面右上角打星。用 @Prop：ForEach 的 key 不变时子组件不会重建，
    *  普通成员变量收不到新值，星标就不会亮 */
   @Prop starred: boolean = false;
@@ -62,6 +64,18 @@ export struct ComicCard {
         }
       }
       .width('100%')
+
+      if (this.sourceTag.length > 0) {
+        Text(this.sourceTag)
+          .fontSize(Theme.fsMicro)
+          .fontColor(Theme.accent)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .backgroundColor(Theme.accentDim)
+          .borderRadius(Theme.radiusS - 2)
+          .margin({ top: 8 })
+      }
 
       Text(this.title)
         .fontSize(Theme.fsLabel + 1)

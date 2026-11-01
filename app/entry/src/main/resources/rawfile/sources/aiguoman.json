@@ -1,0 +1,56 @@
+{
+  "id": "aiguoman",
+  "name": "爱国漫",
+  "baseUrl": "https://www.guoman.net",
+  "charset": "utf-8",
+  "note": "正文图 AES-CBC 加密（params 密文 + 密钥），引擎已支持 aes 解密",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.guoman.net/"
+    }
+  ],
+  "search": {
+    "url": "/search?key={kw}",
+    "list": "div.mh-item",
+    "id": "",
+    "title": "h2.title a@text",
+    "cover": "img.mh-cover@attr:src",
+    "link": "a@attr:href",
+    "author": "",
+    "latest": "p.chapter a@text"
+  },
+  "detail": {
+    "title": "p.detail-info-title@text",
+    "cover": "img.detail-info-cover@attr:src",
+    "author": "p.detail-info-tip a@text",
+    "desc": "p.detail-info-tip@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "div.detail-list-form-con a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "aes",
+    "url": "{chapterUrl}",
+    "aesKey": "9S8$vJnU2ANeSRoF",
+    "aesPattern": "params = '(.*?)';",
+    "aesIvSource": "cipher16",
+    "aesListPattern": "\"images\":\\[(.*?)\\]"
+  },
+  "browse": [
+    {
+      "name": "全部漫画",
+      "url": "/all/",
+      "list": "div.mh-item",
+      "title": "h2.title a@text",
+      "cover": "img.mh-cover@attr:src",
+      "link": "a@attr:href"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "id": "kanman",
+  "name": "看漫画",
+  "baseUrl": "https://m.kanman.com",
+  "charset": "utf-8",
+  "note": "原漫画台(manhuatai)迁移而来，正文图在章节页内联 JS 的 chapter_img_list 数组里，正则直取",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://m.kanman.com/"
+    }
+  ],
+  "search": {
+    "url": "/sort/all.html?cache=false&search_key={kw}",
+    "list": "li.comic-item",
+    "id": "",
+    "title": "p.title@text",
+    "cover": "img@attr:data-src",
+    "link": "a@attr:href",
+    "latest": "",
+    "emptyMarker": ""
+  },
+  "detail": {
+    "title": "h1.comic-title@attr:title",
+    "cover": "div.comic-detail-cover img@attr:data-src",
+    "author": "meta[property=og:novel:author]@attr:content",
+    "desc": "p.comic-describe@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "ul#js_chapter_list li",
+    "id": "",
+    "title": "a.chapter-name@attr:title",
+    "link": "a.chapter-name@attr:href",
+    "reverse": true
+  },
+  "images": {
+    "type": "regex",
+    "url": "{chapterUrl}",
+    "pattern": "current_chapter:\\{[\\s\\S]*?chapter_img_list:\\[([^\\]]*)\\]"
+  },
+  "browse": [
+    {
+      "name": "全部漫画",
+      "url": "/sort/all.html",
+      "list": "li.comic-item"
+    }
+  ]
+}

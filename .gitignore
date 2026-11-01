@@ -1,11 +1,14 @@
 # ── 构建产物 ──
 app/.hvigor/
+.hvigor/
 app/entry/build/
 app/build/
 **/oh_modules/
 **/node_modules/
 **/.cxx/
 local.properties
+logs/
+nul
 
 # ── 签名材料：含证书路径与口令，绝不能提交 ──
 signwork/
