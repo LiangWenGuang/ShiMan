@@ -1,0 +1,50 @@
+{
+  "id": "songzi",
+  "name": "松子漫画",
+  "baseUrl": "https://www.songzimanhua.com",
+  "charset": "utf-8",
+  "note": "图片在页面 JSON-LD 里，走正则直取，速度快",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.songzimanhua.com/"
+    }
+  ],
+  "search": {
+    "url": "/search/?q={kw}",
+    "list": "a.comic-card",
+    "id": "",
+    "title": "strong@text",
+    "cover": "img@attr:src",
+    "link": "@attr:href",
+    "latest": "span@text",
+    "emptyMarker": "暂时没有找到"
+  },
+  "detail": {
+    "title": "h1@text",
+    "cover": ".detail-cover img@attr:src",
+    "author": ".detail-author-line a@text",
+    "desc": "meta[property=og:description]@attr:content",
+    "status": "",
+    "tags": ".tag-list a@text"
+  },
+  "chapters": {
+    "list": "#all-chapters a",
+    "id": "",
+    "title": "span@text",
+    "link": "@attr:href",
+    "reverse": true
+  },
+  "images": {
+    "type": "regex",
+    "url": "{chapterUrl}",
+    "pattern": "\"(https://img\\.songzimanhua\\.com/[^\"]*/comics/chapters/[^\"]+\\.webp)\""
+  },
+  "browse": [
+    {
+      "name": "全部漫画",
+      "url": "/genre/all/",
+      "list": "a.comic-card"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+# ── 构建产物 ──
+app/.hvigor/
+app/entry/build/
+app/build/
+**/oh_modules/
+**/node_modules/
+**/.cxx/
+local.properties
+
+# ── 签名材料：含证书路径与口令，绝不能提交 ──
+signwork/
+*.p7b
+*.p12
+*.cer
+*.csr
+*.keystore
+app/build-profile.json5
+
+# ── 打包产物：签名绑定设备 UDID，别人装了也跑不了 ──
+hap/
+*.hap
+*.hsp
+
+# ── 开发期探测缓存 ──
+tools/dumps/
+tools/probe-*.json
+tools/icon-preview-*.png
+tools/*.log
+
+# ── 调试截图 ──
+/*.jpeg
+/*.jpg
+/*.png
+
+# ── 系统与编辑器 ──
+.DS_Store
+Thumbs.db
+.idea/
+app/.idea/
+*.iml

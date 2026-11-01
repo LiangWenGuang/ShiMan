@@ -1,0 +1,41 @@
+{
+  "id": "tencent",
+  "name": "腾讯动漫",
+  "baseUrl": "https://m.ac.qq.com",
+  "charset": "utf-8",
+  "note": "搜索/详情/目录走 HTML；图片需无头取图，首次打开稍慢",
+  "headers": [
+    { "name": "Referer", "value": "https://m.ac.qq.com/" }
+  ],
+  "search": {
+    "url": "/search/result?word={kw}",
+    "list": "ul.result-list li.comic-item",
+    "id": "",
+    "title": ".comic-title@text",
+    "cover": "img.cover-image@attr:src",
+    "link": "a.comic-link@attr:href",
+    "latest": ".comic-update@text"
+  },
+  "detail": {
+    "title": "h1.top-title@text",
+    "cover": ".head-banner img@attr:src||meta[property=og:image]@attr:content",
+    "author": "",
+    "desc": "meta[property=og:description]@attr:content",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "a.chapter-link",
+    "id": "@attr:data-cid",
+    "title": ".chapter-title@text",
+    "link": "@attr:href"
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "img[src*='acimg']",
+    "extract": "attr:src",
+    "settleMs": 3000
+  },
+  "browse": []
+}

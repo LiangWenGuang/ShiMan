@@ -1,0 +1,54 @@
+{
+  "id": "mhw1",
+  "name": "云北漫画",
+  "baseUrl": "https://www.mhw1.com",
+  "charset": "utf-8",
+  "note": "包子漫画镜像站，正文图直接写在 HTML 里，打开即出图",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.mhw1.com/"
+    }
+  ],
+  "search": {
+    "url": "/search?key={kw}",
+    "list": ".comic-list-item",
+    "id": "",
+    "title": ".comic-name a@text",
+    "cover": "a.cover img@attr:src",
+    "link": "a.cover@attr:href",
+    "author": ".comic-author@text"
+  },
+  "detail": {
+    "title": "h1.comic-name@text",
+    "cover": ".box-back@attr:style~s|.*url\\('([^']+)'\\).*|$1|",
+    "author": ".au-name@text~s|^作者：||",
+    "desc": ".comic-intro@text",
+    "status": "",
+    "tags": ".comic-tags@text"
+  },
+  "chapters": {
+    "list": ".catalog-list li.chapter-item a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href",
+    "reverse": true
+  },
+  "images": {
+    "type": "html",
+    "url": "{chapterUrl}",
+    "list": "ul.comic-list li.comic-page img",
+    "field": "@attr:src"
+  },
+  "browse": [
+    {
+      "name": "首页推荐",
+      "url": "/",
+      "list": ".comic-item-jp",
+      "title": ".comic-name@text",
+      "cover": "img.cover@attr:data-src",
+      "link": "a@attr:href",
+      "latest": ".comic-des@text"
+    }
+  ]
+}

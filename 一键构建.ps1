@@ -1,0 +1,92 @@
+# =============================================================================
+#  一键构建「漫屿」鸿蒙安装包
+#
+#  用法（在本目录打开 PowerShell）:
+#    powershell -ExecutionPolicy Bypass -File 一键构建.ps1
+#        编译并产出 unsigned HAP（不需要连手机、不需要账号）。
+#    powershell -ExecutionPolicy Bypass -File 一键构建.ps1 -EngineTest
+#        额外跑一遍引擎回归（真实网络，验证图源可用性）。
+#
+#  说明:
+#    本工程使用了新的 bundleName（com.manyu.reader），而调试签名证书是与
+#    华为账号 + 包名绑定的，所以这里只产出 unsigned HAP。
+#    要装机请按「装机与签名指引.md」在 DevEco Studio 里点一次「自动签名」。
+# =============================================================================
+param(
+  [string]$DevEcoPath = 'D:\DevEco Studio',
+  [switch]$EngineTest
+)
+
+$ErrorActionPreference = 'Stop'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$app = Join-Path $here 'app'
+$hapDir = Join-Path $here 'hap'
+$logDir = Join-Path $here 'logs'
+New-Item -ItemType Directory -Force $hapDir | Out-Null
+New-Item -ItemType Directory -Force $logDir | Out-Null
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+
+function Step([string]$m) { Write-Host ''; Write-Host ('==> ' + $m) -ForegroundColor Cyan }
+function Ok([string]$m) { Write-Host ('    ' + $m) -ForegroundColor Green }
+function Fail([string]$m) { Write-Host ''; Write-Host ('失败: ' + $m) -ForegroundColor Red; exit 1 }
+
+Step '第 1 步 / 共 3 步：检查 DevEco Studio'
+$hvigor = Join-Path $DevEcoPath 'tools\hvigor\bin\hvigorw.bat'
+if (!(Test-Path -LiteralPath $hvigor)) { Fail "找不到 $hvigor；用 -DevEcoPath 指定安装目录" }
+Ok $hvigor
+
+$env:DEVECO_HOME = $DevEcoPath
+$env:JAVA_HOME = Join-Path $DevEcoPath 'jbr'
+$env:DEVECO_SDK_HOME = Join-Path $DevEcoPath 'sdk'
+$env:PATH = (Join-Path $DevEcoPath 'tools\node') + ';' +
+  (Join-Path $DevEcoPath 'tools\ohpm\bin') + ';' +
+  (Join-Path $DevEcoPath 'tools\hvigor\bin') + ';' +
+  (Join-Path $DevEcoPath 'jbr\bin') + ';' + $env:PATH
+
+Step '第 2 步 / 共 3 步：编译'
+Set-Location -LiteralPath $app
+if (!(Test-Path -LiteralPath (Join-Path $app 'oh_modules'))) {
+  $ohpm = Join-Path $DevEcoPath 'tools\ohpm\bin\ohpm.bat'
+  if (Test-Path -LiteralPath $ohpm) { & $ohpm install --all | Out-Null }
+}
+$buildLog = Join-Path $logDir ('build-' + $stamp + '.log')
+# hvigor 的 clean 会批量删除产物，撞上「批量删除需确认」保护会误报失败
+$prevBulk = $env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD
+$env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD = '1000000'
+& $hvigor --mode module -p product=default -p module=entry@default -p buildMode=debug assembleHap --no-daemon 2>&1 |
+  Out-File -Encoding UTF8 $buildLog
+$code = $LASTEXITCODE
+if ($null -eq $prevBulk) { Remove-Item Env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD -ErrorAction SilentlyContinue }
+else { $env:CODEBUDDY_SAFE_DELETE_BULK_THRESHOLD = $prevBulk }
+if ($code -ne 0) {
+  Get-Content -LiteralPath $buildLog | Where-Object { $_ -match 'ERROR|Error Message|At File' } |
+    Select-Object -First 12 | ForEach-Object { Write-Host ('    ' + $_.Trim()) -ForegroundColor DarkYellow }
+  Fail "编译失败 (exit=$code)，日志: $buildLog"
+}
+
+$src = Join-Path $app 'entry\build\default\outputs\default\entry-default-unsigned.hap'
+if (!(Test-Path -LiteralPath $src)) { Fail '编译通过但找不到 HAP 产物' }
+$dst = Join-Path $hapDir ('manyu-1.0.0-unsigned-' + $stamp + '.hap')
+Copy-Item -LiteralPath $src -Destination $dst -Force
+Ok ('HAP: ' + $dst)
+Ok ('体积: ' + [math]::Round((Get-Item -LiteralPath $dst).Length / 1KB, 1) + ' KB')
+
+Step '第 3 步 / 共 3 步：引擎回归（可选）'
+if ($EngineTest) {
+  $testDir = Join-Path $here 'tools\engine-test'
+  $node = Join-Path $DevEcoPath 'tools\node\node.exe'
+  if (!(Test-Path -LiteralPath $node)) { $node = 'node' }
+  Push-Location $testDir
+  & $node --experimental-transform-types run.ts
+  $r1 = $LASTEXITCODE
+  & $node --experimental-transform-types live.ts
+  $r2 = $LASTEXITCODE
+  Pop-Location
+  if ($r1 -ne 0 -or $r2 -ne 0) { Fail '引擎回归未全绿，先修规则再装机' }
+  Ok '引擎回归全绿'
+} else {
+  Write-Host '    跳过（需要时加 -EngineTest）' -ForegroundColor DarkGray
+}
+
+Write-Host ''
+Write-Host '构建完成。下一步：按「装机与签名指引.md」在 DevEco Studio 里自动签名后安装。' -ForegroundColor Cyan

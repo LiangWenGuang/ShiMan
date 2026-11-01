@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "多源漫画聚合阅读器"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "拾漫主入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "拾漫"
+    }
+  ]
+}

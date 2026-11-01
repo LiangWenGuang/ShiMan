@@ -1,0 +1,59 @@
+{
+  "id": "m206",
+  "name": "206漫画",
+  "baseUrl": "https://www.m206.com",
+  "charset": "utf-8",
+  "note": "搜索、目录、正文全套服务端直出，章节页一次给全 35 张图",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.m206.com/"
+    }
+  ],
+  "search": {
+    "url": "/search?key={kw}",
+    "list": ".comic-list .comic-item",
+    "id": "",
+    "title": "h3 a@attr:title||h3 a@text",
+    "cover": "a.comic-cover img@attr:src",
+    "link": "a.comic-cover@attr:href",
+    "author": ".comic-author@text"
+  },
+  "detail": {
+    "title": ".comic-main-info h1@text",
+    "cover": ".comic-cover-large img@attr:src",
+    "author": "",
+    "desc": ".comic-description p@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": ".chapter-list .chapter-item a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href"
+  },
+  "images": {
+    "type": "html",
+    "url": "{chapterUrl}",
+    "list": ".comic-content img",
+    "field": "@attr:src"
+  },
+  "browse": [
+    {
+      "name": "最近更新",
+      "url": "/custom/new",
+      "list": ".comic-list .comic-item"
+    },
+    {
+      "name": "排行榜",
+      "url": "/custom/top",
+      "list": ".comic-item"
+    },
+    {
+      "name": "分类浏览",
+      "url": "/category/",
+      "list": ".comic-list .comic-item"
+    }
+  ]
+}

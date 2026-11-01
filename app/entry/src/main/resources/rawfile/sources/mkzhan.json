@@ -1,0 +1,116 @@
+{
+  "id": "mkzhan",
+  "name": "漫客栈",
+  "baseUrl": "https://www.mkzhan.com",
+  "charset": "utf-8",
+  "note": "官方接口直连，匿名可读，全链路已验证",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.mkzhan.com/"
+    }
+  ],
+  "search": {
+    "url": "/search/?keyword={kw}",
+    "list": ".search-comic-list .common-comic-item",
+    "id": "@attr:data-cid",
+    "title": ".comic__title a@text",
+    "cover": "img.lazy@attr:data-src",
+    "link": "a.cover@attr:href",
+    "latest": ".comic-update a@text",
+    "emptyMarker": "暂时没有找到"
+  },
+  "detail": {
+    "title": "p.comic-title@text",
+    "cover": ".de-info__cover img@attr:data-src",
+    "author": ".comic-author .name@text||.comic-author@text",
+    "desc": ".comic-intro@text",
+    "status": ".comic-status@text",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "a.j-chapter-link",
+    "id": "@attr:data-chapterid",
+    "title": "@text",
+    "link": "@attr:data-hreflink",
+    "reverse": true
+  },
+  "images": {
+    "type": "json",
+    "url": "https://comic.mkzcdn.com/chapter/content/v1/?chapter_id={chapterId}&comic_id={comicId}&quality=1&type=1&format=0",
+    "list": "$.data.page",
+    "field": "image"
+  },
+  "browse": [
+    {
+      "name": "最近更新",
+      "url": "/update/",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "热门人气",
+      "url": "/category/?order=1",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "更新时间",
+      "url": "/category/?order=2",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "霸总",
+      "url": "/category/?theme_id=1",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "修真",
+      "url": "/category/?theme_id=2",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "恋爱",
+      "url": "/category/?theme_id=3",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "校园",
+      "url": "/category/?theme_id=4",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "冒险",
+      "url": "/category/?theme_id=5",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "搞笑",
+      "url": "/category/?theme_id=6",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "热血",
+      "url": "/category/?theme_id=8",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "玄幻",
+      "url": "/category/?theme_id=12",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "悬疑",
+      "url": "/category/?theme_id=13",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "古风",
+      "url": "/category/?theme_id=19",
+      "list": ".common-comic-item"
+    },
+    {
+      "name": "穿越",
+      "url": "/category/?theme_id=20",
+      "list": ".common-comic-item"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "src": [
+    "pages/Index",
+    "pages/DetailPage",
+    "pages/ReaderPage",
+    "pages/SourceManagerPage",
+    "pages/SourceSwitchPage",
+    "pages/SettingsPage",
+    "pages/FavoritesPage"
+  ]
+}
