@@ -61,6 +61,10 @@ struct Index {
   @State discover: ComicBrief[] = [];
   @State discoverLoading: boolean = false;
   @State discoverError: string = '';
+  /** 下拉刷新/点刷新时的转圈状态 */
+  @State refreshing: boolean = false;
+  /** 本次加载是否由「手动刷新」触发（用来决定要不要弹提示） */
+  private manualRefresh: boolean = false;
   /** 聚合进度文案，如 "8/22" */
   @State discoverProgress: string = '';
   /** 并发令牌：重新聚合时让上一轮的迟到结果作废 */
@@ -125,10 +129,28 @@ struct Index {
   /** 按当前模式加载首页 */
   private loadHome(): void {
     if (this.homeCurrentOnly) {
-      this.loadDiscoverForCurrent(this.browseIndex);
+      this.loadDiscoverForCurrent(0);
     } else {
       this.loadDiscoverAll();
     }
+  }
+
+  /** 下拉 / 点刷新 / 换模式都走这里：统一把 refreshing 打开，数据回来再关 */
+  private refreshHome(): void {
+    this.refreshing = true;
+    this.manualRefresh = true;
+    this.loadHome();
+  }
+
+  /** 手动刷新完成后给个明确反馈，否则数据没变化时用户以为按钮没生效 */
+  private finishManualRefresh(): void {
+    if (!this.manualRefresh) {
+      return;
+    }
+    this.manualRefresh = false;
+    promptAction.showToast({
+      message: this.discover.length > 0 ? `已刷新 · ${this.discover.length} 部` : '没取到内容，检查网络后重试'
+    });
   }
 
   private switchHomeScope(currentOnly: boolean): void {
@@ -142,7 +164,10 @@ struct Index {
     this.loadHome();
   }
 
-  /** 只看当前图源：拉它某一个分类入口（默认第一个） */
+  /**
+   * 只看当前图源：直接拉它的第一个入口（各站的「首页 / 全部更新」）。
+   * 首页不跟分类挂钩 —— 分类/榜单在「排行榜」页里看，首页只负责把当前源的东西铺开。
+   */
   private async loadDiscoverForCurrent(index: number): Promise<void> {
     const registry = SourceRegistry.get();
     const rule = registry.find(registry.currentSourceId());
@@ -151,11 +176,15 @@ struct Index {
     if (rule === null) {
       this.discover = [];
       this.discoverError = '还没有可用图源\n请到「我的 → 图源管理」启用';
+      this.refreshing = false;
+      this.manualRefresh = false;
       return;
     }
     if (rule.browse.length === 0) {
       this.discover = [];
-      this.discoverError = `${rule.name} 没有提供分类入口\n可直接用「搜索」找漫画`;
+      this.discoverError = `${rule.name} 没提供首页入口\n可以到「搜索」或「排行榜」找漫画`;
+      this.refreshing = false;
+      this.manualRefresh = false;
       return;
     }
     const safeIndex = index < 0 || index >= rule.browse.length ? 0 : index;
@@ -164,12 +193,15 @@ struct Index {
     this.discoverError = '';
     const outcome = await SourceApi.browse(rule, rule.browse[safeIndex], 1);
     this.discoverLoading = false;
+    this.refreshing = false;
     if (outcome.ok && outcome.value !== undefined) {
-      this.discover = outcome.value;
+      // 换一个新数组，确保 ForEach 能感知到变化
+      this.discover = outcome.value.slice(0);
     } else {
       this.discover = [];
       this.discoverError = outcome.message;
     }
+    this.finishManualRefresh();
   }
 
   /**
@@ -188,6 +220,8 @@ struct Index {
     this.discoverProgress = `0/${list.length}`;
     if (list.length === 0) {
       this.discoverLoading = false;
+      this.refreshing = false;
+      this.manualRefresh = false;
       this.discoverError = '还没有可用图源\n请到「我的 → 图源管理」启用';
       return;
     }
@@ -214,9 +248,11 @@ struct Index {
     }
 
     this.discoverLoading = false;
+    this.refreshing = false;
     if (this.discover.length === 0) {
       this.discoverError = '暂时没取到内容\n检查网络后重试，或到「搜索」里找漫画';
     }
+    this.finishManualRefresh();
   }
 
   /** 拉单个源的首页入口，结果按源分桶（同名去重） */
@@ -558,7 +594,7 @@ struct Index {
       Row() {
         SymbolGlyph($r('sys.symbol.arrow_clockwise'))
           .fontSize(15)
-          .fontColor([Theme.accent])
+          .fontColor([this.refreshing ? Theme.textDim : Theme.accent])
       }
       .width(36)
       .height(36)
@@ -566,42 +602,11 @@ struct Index {
       .backgroundColor(Theme.surface)
       .borderRadius(Theme.radiusPill)
       .onClick(() => {
-        this.loadHome();
+        this.refreshHome();
       })
     }
     .width('100%')
     .padding({ left: Theme.gapL, right: Theme.gapL, bottom: Theme.gapM })
-  }
-
-  /** 当前源有多个分类（顶漫画 3 个、漫客栈 14 个）时给一排分类胶囊 */
-  @Builder
-  homeCategoryRow() {
-    if (this.homeCurrentOnly && this.browseNames.length > 1) {
-      Scroll() {
-        Row() {
-          ForEach(this.browseNames, (name: string, index: number) => {
-            Text(name)
-              .fontSize(Theme.fsLabel)
-              .fontWeight(index === this.browseIndex ? FontWeight.Medium : FontWeight.Normal)
-              .fontColor(index === this.browseIndex ? Theme.onAccent : Theme.textSub)
-              .height(32)
-              .padding({ left: 14, right: 14 })
-              .backgroundColor(index === this.browseIndex ? Theme.accent : Theme.surface)
-              .borderRadius(Theme.radiusPill)
-              .margin({ right: Theme.gapS })
-              .textAlign(TextAlign.Center)
-              .onClick(() => {
-                this.loadDiscoverForCurrent(index);
-              })
-          }, (name: string, index: number) => `home_cat_${index}_${name}`)
-        }
-        .padding({ left: Theme.gapL, right: Theme.gapL })
-      }
-      .scrollable(ScrollDirection.Horizontal)
-      .scrollBar(BarState.Off)
-      .width('100%')
-      .padding({ bottom: Theme.gapM })
-    }
   }
 
   /** 首页副栏：加载中显示进度，加载完显示总数 */
@@ -668,7 +673,13 @@ struct Index {
       .width('100%')
       .alignItems(VerticalAlign.Top)
       .margin({ bottom: 18 })
-    }, (row: ComicBrief[], index: number) => `row_${index}_${row.length}`)
+    }, (row: ComicBrief[], index: number) => {
+      // key 必须带上该行首条漫画：只写 index+length 的话，
+      // 换分类后如果条数和行长一样（比如都是 24 条 3 列），
+      // ForEach 会认为行没变化，界面就完全不动 —— 这就是「切分类没反应」的原因
+      const head = row.length > 0 ? `${row[0].sourceId}_${row[0].comicId}` : 'empty';
+      return `row_${index}_${row.length}_${head}`;
+    })
   }
 
   /** 图源显示名；找不到就用 sourceId 兜底，避免空标签 */
@@ -682,31 +693,38 @@ struct Index {
     Column() {
       this.appHeader()
       this.homeScopeBar()
-      this.homeCategoryRow()
       this.discoverStatusBar()
       if (this.discover.length === 0 && this.discoverLoading) {
         this.loadingBlock(this.homeCurrentOnly ? '正在加载当前图源…' : '正在聚合全部图源…')
       } else if (this.discover.length === 0 && this.discoverError.length > 0) {
         this.emptyBlock(this.discoverError, '', '重新加载', () => {
-          this.loadHome();
+          this.refreshHome();
         })
       } else if (this.discover.length === 0) {
-        this.emptyBlock('暂时没有内容', '到「搜索」里找找，或稍后刷新', '重新加载', () => {
-          this.loadHome();
+        this.emptyBlock('暂时没有内容', '到「搜索」里找找，或下拉刷新', '重新加载', () => {
+          this.refreshHome();
         })
       } else {
-        List() {
-          ListItem() {
-            Column() {
-              // 只看当前图源时不重复标注来源；聚合模式才加来源标签
-              this.comicGrid(this.discover, !this.homeCurrentOnly)
+        // 下拉刷新：Refresh 的子树必须是可滚动组件，List 正好
+        Refresh({ refreshing: this.refreshing }) {
+          List() {
+            ListItem() {
+              Column() {
+                // 只看当前图源时不重复标注来源；聚合模式才加来源标签
+                this.comicGrid(this.discover, !this.homeCurrentOnly)
+              }
+              .padding({ left: Theme.gapM, right: Theme.gapM, top: Theme.gapS })
             }
-            .padding({ left: Theme.gapM, right: Theme.gapM, top: Theme.gapS })
           }
+          .width('100%')
+          .height('100%')
+          .scrollBar(BarState.Off)
+          .edgeEffect(EdgeEffect.Spring)
         }
+        .onRefreshing(() => {
+          this.refreshHome();
+        })
         .layoutWeight(1)
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
       }
     }
     .width('100%')
