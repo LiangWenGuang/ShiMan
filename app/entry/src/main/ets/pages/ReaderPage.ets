@@ -5,9 +5,11 @@ import { SourceApi, ImageResult } from '../source/SourceApi';
 import { SourceRule } from '../rule/Rules';
 import { ComicBrief, ComicDetail, ChapterBrief, PageImage, ReadProgress } from '../model/Models';
 import { Library } from '../store/Library';
+import { SwitchBus } from '../store/SwitchBus';
 import { ReaderParams, SwitchParams } from '../model/RouteParams';
 import { parseJson, JsonKind } from '../parse/Json';
 import { Trace } from '../util/Trace';
+import { shortTime } from '../util/Text';
 import { RemoteImage } from '../view/RemoteImage';
 import { Theme } from '../theme/Theme';
 
@@ -58,6 +60,8 @@ struct ReaderPage {
   private params: ReaderParams = new ReaderParams();
   private scroller: Scroller = new Scroller();
   private catalogScroller: Scroller = new Scroller();
+  /** 继续阅读要恢复到的页（0 起，-1 表示不恢复） */
+  private targetPage: number = -1;
 
   aboutToAppear(): void {
     // router.getParams() 返回的是普通对象，ArkTS 下直接 `as ReaderParams` 强转后
@@ -72,6 +76,8 @@ struct ReaderPage {
       const ci = p['chapterIndex'];
       safe.chapterIndex = typeof ci === 'number' ? ci : (parseInt(this.asString(ci), 10) || 0);
       safe.chapterId = this.asString(p['chapterId']);
+      const pg = p['page'];
+      safe.page = typeof pg === 'number' ? pg : (parseInt(this.asString(pg), 10) || 0);
       this.params = safe;
     }
     Trace.write('reader', 'enter source=' + this.params.sourceId +
@@ -86,6 +92,23 @@ struct ReaderPage {
       return '';
     }
     return String(value);
+  }
+
+  /**
+   * 从换源页返回：换源不再自动进阅读器，而是退回上一页（详情页或阅读器）后
+   * 由上一页接管。阅读器这里接管时重新用新源加载并跳到对齐的章节。
+   */
+  onPageShow(): void {
+    const pending = SwitchBus.take();
+    if (pending === null || pending.sourceId.length === 0) {
+      return;
+    }
+    this.params.sourceId = pending.sourceId;
+    this.params.comicId = pending.comicId;
+    this.params.comicUrl = pending.url;
+    this.params.chapterIndex = pending.chapterIndex >= 0 ? pending.chapterIndex : 0;
+    this.params.chapterId = '';
+    this.bootstrap();
   }
 
   private async bootstrap(): Promise<void> {
@@ -148,7 +171,9 @@ struct ReaderPage {
     if (start < 0 || start >= total) {
       start = 0;
     }
+    this.targetPage = this.params.page > 0 ? this.params.page : -1;
     await this.loadChapter(start);
+    this.scrollToTargetPage();
   }
 
   /**
@@ -337,6 +362,7 @@ struct ReaderPage {
       this.images = images;
       Trace.write('harvest', 'done images=' + images.length);
       this.saveProgress();
+      this.scrollToTargetPage();
     } catch (error) {
       Trace.write('harvest', 'exception ' + String(error));
       this.finishHarvest('取图脚本执行失败，可尝试换源');
@@ -369,6 +395,19 @@ struct ReaderPage {
     progress.chapterTitle = chapter.title;
     progress.page = this.currentPage;
     Library.get().saveProgress(progress);
+  }
+
+  /** 继续阅读时滚到上次看到的页（0 起），只消费一次 */
+  private scrollToTargetPage(): void {
+    if (this.targetPage < 0 || this.images.length === 0) {
+      return;
+    }
+    const page = this.targetPage < this.images.length ? this.targetPage : this.images.length - 1;
+    this.targetPage = -1;
+    this.currentPage = page;
+    setTimeout(() => {
+      this.scroller.scrollToIndex(page);
+    }, 120);
   }
 
   /** 目录按当前排序显示，翻的是副本；上一章/下一章仍按原始章节顺序 */
@@ -433,10 +472,10 @@ struct ReaderPage {
   topBar() {
     Row() {
       Row() {
-        Text('‹')
-          .fontSize(26)
-          .fontColor(TEXT_MAIN)
-          .margin({ right: 2 })
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(22)
+          .fontColor([TEXT_MAIN])
+          .margin({ right: 4 })
         Text('返回')
           .fontSize(Theme.fsBody)
           .fontColor(TEXT_MAIN)
@@ -597,6 +636,12 @@ struct ReaderPage {
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .layoutWeight(1)
+              if (chapter.time.length > 0) {
+                Text(shortTime(chapter.time))
+                  .fontSize(Theme.fsMicro)
+                  .fontColor(Theme.textDim)
+                  .margin({ left: 8 })
+              }
               if (chapter.index === this.chapterIndex) {
                 Text('阅读中')
                   .fontSize(Theme.fsMicro)
@@ -604,6 +649,7 @@ struct ReaderPage {
                   .padding({ left: 7, right: 7, top: 2, bottom: 2 })
                   .backgroundColor(Theme.accentDim)
                   .borderRadius(Theme.radiusS - 2)
+                  .margin({ left: 8 })
               }
             }
             .width('100%')

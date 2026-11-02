@@ -4,11 +4,12 @@
  */
 
 import { SourceRule, BrowseRule } from '../rule/Rules';
-import { Http, HttpResponse, HttpHeader, defaultHeaders } from '../net/Http';
+import { Http, HttpResponse, HttpHeader, defaultHeaders, describeError } from '../net/Http';
 import {
   parseListItems, parseDetailFields, parseChapters,
   parseImagesFromJson, parseImagesFromHtml, parseImagesFromRegex, parseImagesFromSequence, UrlVars,
-  readEmbeddedJson, parseChaptersFromJson, parseImagesFromAes
+  readEmbeddedJson, parseChaptersFromJson, parseImagesFromAes, parseImagesFromBase64, mergeChapters,
+  parseSearchFromJson
 } from '../rule/Engine';
 import { parseHtml, HtmlDocument } from '../parse/Html';
 import { Outcome, ComicBrief, ComicDetail, ChapterBrief, PageImage } from '../model/Models';
@@ -44,7 +45,10 @@ export class SourceApi {
       .set('keyword', encodeURIComponent(keyword))
       .set('page', String(page));
     const url = resolveUrl(rule.baseUrl, vars.apply(rule.search.url));
-    const response = await Http.get(url, buildHeaders(rule, rule.baseUrl), rule.charset);
+    const body = vars.apply(rule.search.body);
+    const response = rule.search.method === 'post'
+      ? await Http.post(url, buildHeaders(rule, rule.baseUrl), rule.charset, body)
+      : await Http.get(url, buildHeaders(rule, rule.baseUrl), rule.charset);
     if (!response.ok) {
       return Outcome.failure<ComicBrief[]>(`${rule.name}：${response.error}`);
     }
@@ -52,24 +56,29 @@ export class SourceApi {
       return Outcome.failure<ComicBrief[]>(`${rule.name}：没有这本`);
     }
     try {
-      const items = parseListItems(
-        response.body,
-        rule.search.listSelector,
-        rule.id,
-        url,
-        rule.search.title,
-        rule.search.cover,
-        rule.search.link,
-        rule.search.id,
-        rule.search.author,
-        rule.search.latest
-      );
+      let items: ComicBrief[] = [];
+      if (rule.search.responseType === 'json') {
+        items = parseSearchFromJson(response.body, rule, url);
+      } else {
+        items = parseListItems(
+          response.body,
+          rule.search.listSelector,
+          rule.id,
+          url,
+          rule.search.title,
+          rule.search.cover,
+          rule.search.link,
+          rule.search.id,
+          rule.search.author,
+          rule.search.latest
+        );
+      }
       if (items.length === 0) {
         return Outcome.failure<ComicBrief[]>(`${rule.name}：没有匹配结果`);
       }
       return Outcome.success(items);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error);
       return Outcome.failure<ComicBrief[]>(`${rule.name}：解析失败 ${message}`);
     }
   }
@@ -97,7 +106,7 @@ export class SourceApi {
       );
       return Outcome.success(items);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error);
       return Outcome.failure<ComicBrief[]>(`${rule.name}：解析失败 ${message}`);
     }
   }
@@ -126,7 +135,7 @@ export class SourceApi {
       if (rule.chapters.json.enabled()) {
         if (rule.chapters.json.source === 'inline') {
           const jsonText = readEmbeddedJson(doc, rule.chapters.json.selector);
-          detail.chapters = parseChaptersFromJson(jsonText, rule, url);
+          detail.chapters = parseChaptersFromJson(jsonText, rule, url, comicId);
         } else {
           const jsonUrl = new UrlVars()
             .set('comicId', comicId)
@@ -134,13 +143,31 @@ export class SourceApi {
             .set('url', url)
             .apply(rule.chapters.json.url);
           const targetJsonUrl = resolveUrl(rule.baseUrl, jsonUrl);
+          const jsonBody = new UrlVars()
+            .set('comicId', comicId)
+            .set('id', comicId)
+            .set('url', url)
+            .apply(rule.chapters.json.body);
           const jsonResponse = rule.chapters.json.method === 'post'
-            ? await Http.post(targetJsonUrl, buildHeaders(rule, url), rule.charset, rule.chapters.json.body)
+            ? await Http.post(targetJsonUrl, buildHeaders(rule, url), rule.charset, jsonBody)
             : await Http.get(targetJsonUrl, buildHeaders(rule, url), rule.charset);
           if (jsonResponse.ok) {
             const base = rule.chapters.json.baseUrl.length > 0
               ? rule.chapters.json.baseUrl : targetJsonUrl;
-            detail.chapters = parseChaptersFromJson(jsonResponse.body, rule, base);
+            if (rule.chapters.mergeHtml) {
+              // 详情页只给最近 N 章、其余在接口里：两段按原顺序拼接去重，最后统一倒序
+              const htmlChapters = parseChapters(doc, rule, url, false);
+              const jsonChapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId, false);
+              detail.chapters = mergeChapters(htmlChapters, jsonChapters);
+              if (rule.chapters.reverse) {
+                detail.chapters.reverse();
+                for (let i = 0; i < detail.chapters.length; i++) {
+                  detail.chapters[i].index = i;
+                }
+              }
+            } else {
+              detail.chapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId);
+            }
           }
         }
       } else if (rule.chapters.url.length > 0) {
@@ -165,7 +192,7 @@ export class SourceApi {
       }
       return Outcome.success(detail);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error);
       return Outcome.failure<ComicDetail>(`${rule.name}：解析失败 ${message}`);
     }
   }
@@ -214,6 +241,8 @@ export class SourceApi {
         result.images = parseImagesFromSequence(response.body, rule, chapter.url);
       } else if (rule.images.type === 'aes') {
         result.images = await parseImagesFromAes(response.body, rule, chapter.url);
+      } else if (rule.images.type === 'base64') {
+        result.images = parseImagesFromBase64(response.body, rule, chapter.url);
       } else {
         result.images = parseImagesFromJson(response.body, rule, chapter.url);
       }
@@ -222,7 +251,7 @@ export class SourceApi {
       }
       return Outcome.success(result);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error);
       return Outcome.failure<ImageResult>(`${rule.name}：图片解析失败 ${message}`);
     }
   }

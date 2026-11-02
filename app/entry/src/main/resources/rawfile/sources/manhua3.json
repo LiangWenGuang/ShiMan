@@ -1,0 +1,52 @@
+{
+  "id": "manhua3",
+  "name": "漫画3",
+  "baseUrl": "https://www.manhua3.com",
+  "charset": "utf-8",
+  "note": "搜索有图片验证码不可用，仅支持分类浏览；正文图由站点脚本懒加载，走无头取图，首次打开稍慢",
+  "headers": [
+    { "name": "Referer", "value": "https://www.manhua3.com/" }
+  ],
+  "search": {
+    "url": "/search?key={kw}",
+    "list": "a.module-poster-item",
+    "id": "",
+    "title": "@attr:title",
+    "cover": "img@attr:data-original",
+    "link": "@attr:href",
+    "author": "",
+    "latest": ""
+  },
+  "detail": {
+    "title": "h1@text",
+    "cover": "meta[property='og:image']@attr:content",
+    "author": "",
+    "desc": "meta[property='og:description']@attr:content||.module-info-introduction-content@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": ".module-play-list a.module-play-list-link",
+    "id": "",
+    "title": "span@text||@attr:title",
+    "link": "@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "img[data-read-src], .comic-content img, #images img",
+    "extract": "attr:data-read-src",
+    "settleMs": 4500
+  },
+  "browse": [
+    {
+      "name": "首页推荐",
+      "url": "/",
+      "list": "a.module-poster-item",
+      "title": "@attr:title",
+      "cover": "img@attr:data-original",
+      "link": "@attr:href"
+    }
+  ]
+}

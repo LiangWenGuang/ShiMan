@@ -1,0 +1,121 @@
+{
+  "id": "rumanhua",
+  "name": "如漫画",
+  "baseUrl": "http://www.rumanhua2.com",
+  "charset": "utf-8",
+  "note": "搜索走 POST /s，目录=详情页最近28章+接口 /morechapter 全量；正文图被 JS 加密，需无头取图，首次打开稍慢",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "http://www.rumanhua2.com/"
+    }
+  ],
+  "search": {
+    "url": "/s",
+    "method": "post",
+    "body": "k={kw}",
+    "list": "div.item-data.s-data div.col-auto",
+    "id": "a@attr:href~s|/([^/]+)/?$|$1|",
+    "title": "p.e-title@text",
+    "cover": "img@attr:data-src",
+    "link": "a@attr:href",
+    "author": "p.tip@text",
+    "latest": ""
+  },
+  "detail": {
+    "title": "h1.name_mh@text",
+    "cover": "div.himg img@attr:data-src",
+    "author": "div.detinfo span@text~s|作\\s*者[:：]\\s*||",
+    "desc": "p.content@text",
+    "status": "div.detinfo p.gray span:last-child@text~s|状\\s*态[:：]\\s*||",
+    "tags": "div.detinfo p.gray span:first-child@text~s|标\\s*签[:：]\\s*||"
+  },
+  "chapters": {
+    "list": "div.chapterlistload ul a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href",
+    "reverse": true,
+    "mergeHtml": true,
+    "json": {
+      "source": "remote",
+      "url": "/morechapter",
+      "method": "post",
+      "body": "id={comicId}",
+      "path": "$.data",
+      "idField": "chapterid",
+      "titleField": "chaptername",
+      "linkField": "",
+      "linkTemplate": "/{comicId}/{chapterid}.html",
+      "baseUrl": "http://www.rumanhua2.com"
+    }
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "div.chapter-img-box img",
+    "extract": "attr:data-src",
+    "settleMs": 3500
+  },
+  "browse": [
+    {
+      "name": "全部更新",
+      "url": "/",
+      "list": "div.item-data div.col-auto",
+      "title": "p.e-title@text",
+      "cover": "img@attr:data-src",
+      "link": "a@attr:href",
+      "author": "p.tip@text"
+    },
+    {
+      "name": "精品榜",
+      "url": "/rank/1",
+      "list": "div.likedata",
+      "title": "p.le-t@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "p:contains(作者：)@text~s|^作者：||",
+      "latest": "p:contains(最新：)@text~s|^最新：||"
+    },
+    {
+      "name": "冒险",
+      "url": "/sort/1",
+      "list": "div.likedata",
+      "title": "p.le-t@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "p:contains(作者：)@text~s|^作者：||",
+      "latest": "p:contains(最新：)@text~s|^最新：||"
+    },
+    {
+      "name": "热血",
+      "url": "/sort/2",
+      "list": "div.likedata",
+      "title": "p.le-t@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "p:contains(作者：)@text~s|^作者：||",
+      "latest": "p:contains(最新：)@text~s|^最新：||"
+    },
+    {
+      "name": "恋爱",
+      "url": "/sort/7",
+      "list": "div.likedata",
+      "title": "p.le-t@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "p:contains(作者：)@text~s|^作者：||",
+      "latest": "p:contains(最新：)@text~s|^最新：||"
+    },
+    {
+      "name": "完结",
+      "url": "/sort/16",
+      "list": "div.likedata",
+      "title": "p.le-t@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "p:contains(作者：)@text~s|^作者：||",
+      "latest": "p:contains(最新：)@text~s|^最新：||"
+    }
+  ]
+}

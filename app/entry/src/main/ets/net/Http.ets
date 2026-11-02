@@ -9,6 +9,7 @@
 
 import { http } from '@kit.NetworkKit';
 import { util } from '@kit.ArkTS';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 const MAX_BODY_BYTES: number = 8 * 1024 * 1024;
 const DEFAULT_UA: string =
@@ -37,6 +38,24 @@ export class HttpHeader {
 
 function isIdempotent(method: http.RequestMethod): boolean {
   return method === http.RequestMethod.GET || method === http.RequestMethod.HEAD;
+}
+
+/**
+ * 把 catch 到的错误转成能给人看的文字。
+ *
+ * 鸿蒙的网络异常多是 BusinessError（普通对象，只有 code/message 字段），
+ * 直接 `String(error)` 只会得到 `[object Object]`，界面上一片无语。
+ */
+export function describeError(error: Error): string {
+  const message = error.message;
+  if (message !== undefined && message !== null && message.length > 0) {
+    return message;
+  }
+  const code = (error as BusinessError).code;
+  if (code !== undefined && code !== null && code !== 0) {
+    return `网络请求失败（错误码 ${code}）`;
+  }
+  return '网络请求失败';
 }
 
 function detectCharset(contentType: string, fallback: string): string {
@@ -134,6 +153,24 @@ export class Http {
         headerObject[item.name] = item.value;
       }
     }
+    // POST 带 body 时补 Content-Type：JSON 体用 application/json，其余按表单编码。
+    // 否则部分站（如如漫画）收不到表单参数，返回空结果。
+    if (method === http.RequestMethod.POST && body.length > 0) {
+      let hasContentType = false;
+      for (let i = 0; i < headers.length; i++) {
+        if (headers[i].name.toLowerCase() === 'content-type') {
+          hasContentType = true;
+          break;
+        }
+      }
+      if (!hasContentType) {
+        const trimmed = body.trimStart();
+        headerObject['Content-Type'] =
+          (trimmed.startsWith('{') || trimmed.startsWith('['))
+            ? 'application/json; charset=utf-8'
+            : 'application/x-www-form-urlencoded; charset=utf-8';
+      }
+    }
     const request = http.createHttp();
     try {
       const response: http.HttpResponse = await request.request(url, {
@@ -167,7 +204,7 @@ export class Http {
       }
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = describeError(error);
       result.error = message;
       result.ok = false;
       // 幂等请求重试一次：多数是首包握手抖动
@@ -217,7 +254,7 @@ export class Http {
       }
       return result;
     } catch (error) {
-      result.error = error instanceof Error ? error.message : String(error);
+      result.error = describeError(error);
       result.ok = false;
       return result;
     } finally {

@@ -1,0 +1,77 @@
+{
+  "id": "didi",
+  "name": "滴滴漫画",
+  "baseUrl": "https://www.didimh.com",
+  "charset": "utf-8",
+  "note": "搜索/详情/目录/正文图全纯 HTTP，正文图是明文 webp 列表，加载快",
+  "headers": [
+    {
+      "name": "Referer",
+      "value": "https://www.didimh.com/"
+    }
+  ],
+  "search": {
+    "url": "/d89?searchkey={kw}",
+    "list": "ul#list li",
+    "id": "",
+    "title": "div.nmain_cl_tit@text",
+    "cover": "img@attr:data-src||img@attr:src",
+    "link": "a@attr:href",
+    "author": "div.nmain_cl_author@text",
+    "latest": "div.nmain_cl_newc p@text"
+  },
+  "detail": {
+    "title": "h1@text",
+    "cover": "div.nmain_com_p1 img@attr:data-src||div.nmain_com_p1 img@attr:src",
+    "author": "span.ncp1b_author@text",
+    "desc": "div.nmain_com_p2 p@text",
+    "status": "",
+    "tags": "span.ncp1b_tips@text"
+  },
+  "chapters": {
+    "list": "ul#ncp3_ul li",
+    "id": "",
+    "title": "div.ncp3li_title@text",
+    "link": "a@attr:href",
+    "reverse": false,
+    "time": "span.ncp3li_time@text"
+  },
+  "images": {
+    "type": "html",
+    "url": "{chapterUrl}",
+    "list": "div.imgpic img",
+    "field": "@attr:data-original||@attr:data-src||@attr:src"
+  },
+  "browse": [
+    {
+      "name": "阅读榜",
+      "url": "/top.html?type=0",
+      "list": "ul#list li",
+      "title": "div.nmain_cl_tit@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "div.nmain_cl_author@text",
+      "latest": "div.nmain_cl_newc p@text"
+    },
+    {
+      "name": "最新更新",
+      "url": "/top.html?type=2",
+      "list": "ul#list li",
+      "title": "div.nmain_cl_tit@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "div.nmain_cl_author@text",
+      "latest": "div.nmain_cl_newc p@text"
+    },
+    {
+      "name": "月阅读榜",
+      "url": "/top.html?type=5",
+      "list": "ul#list li",
+      "title": "div.nmain_cl_tit@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "div.nmain_cl_author@text",
+      "latest": "div.nmain_cl_newc p@text"
+    }
+  ]
+}

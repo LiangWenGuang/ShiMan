@@ -45,12 +45,49 @@
   },
   "browse": [
     {
-      "name": "全部漫画",
-      "url": "/all/",
+      "name": "最近更新",
+      "url": "/custom/update",
       "list": "div.mh-item",
       "title": "h2.title a@text",
       "cover": "img.mh-cover@attr:src",
-      "link": "a@attr:href"
+      "link": "a@attr:href",
+      "latest": "p.chapter a@attr:title"
+    },
+    {
+      "name": "奇幻",
+      "url": "/category/tags/2569",
+      "list": "div.mh-item",
+      "title": "h2.title a@text",
+      "cover": "img.mh-cover@attr:src",
+      "link": "a@attr:href",
+      "latest": "p.chapter a@attr:title"
+    },
+    {
+      "name": "热血",
+      "url": "/category/tags/2572",
+      "list": "div.mh-item",
+      "title": "h2.title a@text",
+      "cover": "img.mh-cover@attr:src",
+      "link": "a@attr:href",
+      "latest": "p.chapter a@attr:title"
+    },
+    {
+      "name": "都市",
+      "url": "/category/tags/2571",
+      "list": "div.mh-item",
+      "title": "h2.title a@text",
+      "cover": "img.mh-cover@attr:src",
+      "link": "a@attr:href",
+      "latest": "p.chapter a@attr:title"
+    },
+    {
+      "name": "穿越",
+      "url": "/category/tags/2573",
+      "list": "div.mh-item",
+      "title": "h2.title a@text",
+      "cover": "img.mh-cover@attr:src",
+      "link": "a@attr:href",
+      "latest": "p.chapter a@attr:title"
     }
   ]
 }

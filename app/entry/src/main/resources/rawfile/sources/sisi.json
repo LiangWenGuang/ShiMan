@@ -5,7 +5,10 @@
   "charset": "utf-8",
   "note": "逆推自 MyComic（sisimanhua.com）；搜索/详情/目录纯 HTML，正文图为 view/{id}/{n}.webp 序号地址，用无头取图兜底",
   "headers": [
-    { "name": "Referer", "value": "https://m.sisimanhua.com/" }
+    {
+      "name": "Referer",
+      "value": "https://m.sisimanhua.com/"
+    }
   ],
   "search": {
     "url": "/search/?keywords={kw}",
@@ -41,12 +44,13 @@
   },
   "browse": [
     {
-      "name": "首页",
+      "name": "最近更新",
       "url": "/",
-      "list": "div.itemBox",
-      "title": "a.title@text",
-      "cover": "mip-img@attr:src||img@attr:src",
-      "link": "a.title@attr:href"
+      "list": "ul.col_3_1 li",
+      "title": "a.txtA@text",
+      "cover": "a.ImgA img@attr:src||img@attr:data-src",
+      "link": "a.ImgA@attr:href",
+      "latest": "span.info@text"
     }
   ]
 }

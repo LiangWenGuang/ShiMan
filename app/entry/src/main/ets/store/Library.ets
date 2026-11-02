@@ -15,6 +15,7 @@ const KEY_SHELF = 'shelf';
 const KEY_PROGRESS = 'progress';
 const KEY_FAVORITE = 'favorite';
 const KEY_CHAPTER_DESCENDING = 'chapter_descending';
+const KEY_CHAPTER_COLUMNS = 'chapter_columns';
 const KEY_SEARCH_HISTORY = 'search_history';
 
 function enc(value: string): string {
@@ -38,6 +39,8 @@ export class Library {
   private progressItems: Map<string, ReadProgress> = new Map<string, ReadProgress>();
   /** 详情页与阅读器共用的目录展示顺序，不影响章节原始索引 */
   private chapterDescending: boolean = false;
+  /** 章节目录每行几列（1 或 2），详情页可切换并持久化 */
+  private chapterColumnsValue: number = 2;
   /** 搜索历史（新在前，最多存 20 条，展示取前 10） */
   private searchHistoryItems: string[] = [];
   private ready: boolean = false;
@@ -74,6 +77,10 @@ export class Library {
       if (typeof chapterOrderRaw === 'boolean') {
         this.chapterDescending = chapterOrderRaw;
       }
+      const chapterColumnsRaw = await this.store.get(KEY_CHAPTER_COLUMNS, 2);
+      if (typeof chapterColumnsRaw === 'number') {
+        this.chapterColumnsValue = chapterColumnsRaw === 1 ? 1 : 2;
+      }
       const historyRaw = await this.store.get(KEY_SEARCH_HISTORY, '');
       if (typeof historyRaw === 'string' && historyRaw.length > 0) {
         this.searchHistoryItems = this.decodeSearchHistory(historyRaw);
@@ -102,6 +109,28 @@ export class Library {
       }
     }).catch(() => {
       // 内存中的偏好仍然生效，下次启动沿用上次成功写入的值
+    });
+  }
+
+  chapterColumns(): number {
+    return this.chapterColumnsValue === 1 ? 1 : 2;
+  }
+
+  setChapterColumns(columns: number): void {
+    const next = columns === 1 ? 1 : 2;
+    if (this.chapterColumnsValue === next) {
+      return;
+    }
+    this.chapterColumnsValue = next;
+    if (this.store === null) {
+      return;
+    }
+    this.store.put(KEY_CHAPTER_COLUMNS, next).then(() => {
+      if (this.store !== null) {
+        this.store.flush();
+      }
+    }).catch(() => {
+      // 内存偏好仍生效
     });
   }
 

@@ -38,6 +38,21 @@ export class SearchRule {
   latest: string = '';
   link: string = '';
   paged: boolean = false;
+  /** 请求方法：get（默认）/ post */
+  method: string = 'get';
+  /** method=post 时的请求体（表单，支持 {kw}/{keyword}/{page} 模板） */
+  body: string = '';
+  /** 响应类型：html（默认）/ json（有些站搜索返回 JSON 数组） */
+  responseType: string = 'html';
+  /** JSON 搜索：列表路径（如 $.data） */
+  jsonPath: string = '$';
+  jsonIdField: string = 'id';
+  jsonTitleField: string = 'name';
+  jsonCoverField: string = 'cover';
+  jsonAuthorField: string = 'author';
+  jsonLatestField: string = '';
+  /** JSON 搜索：详情链接模板（如 /{id}/），留空则用 id 直接当链接 */
+  jsonLinkTemplate: string = '';
   /**
    * 空结果标记：页面里出现这段文字就说明「站点没搜到，给你看的是推荐位」。
    * 不做这个判断的话，聚合搜索会被推荐内容污染。
@@ -77,9 +92,16 @@ export class ChapterRule {
   id: string = '';
   title: string = '';
   link: string = '';
+  /** 更新时间取值表达式；站点不带时间就留空 */
+  time: string = '';
   reverse: boolean = false;
   /** 章节地址是否需要从详情页的基础地址拼接 */
   fromDetailPage: boolean = true;
+  /**
+   * 合并模式：详情页只内嵌最近 N 章、其余在接口里时（如如漫画），
+   * 先取 HTML 里的章节、再取接口里的章节，按 URL 去重后拼接。
+   */
+  mergeHtml: boolean = false;
   /** 可选：章节来自 JSON（页面内嵌 / 远程接口） */
   json: JsonChapterRule = new JsonChapterRule();
 }
@@ -100,6 +122,8 @@ export class JsonChapterRule {
   idField: string = 'id';
   titleField: string = 'title';
   linkField: string = 'url';
+  /** 更新时间字段名；接口里没有就留空 */
+  timeField: string = '';
   /** link 是相对地址时的基准；留空用页面地址 */
   baseUrl: string = '';
   /** get（默认）/ post：少数站点用 POST 返回整份目录 */
@@ -147,11 +171,22 @@ export class ImageRule {
   template: string = '';
   /** sequence 模式没匹配到数量时的兜底上限，避免产出 0 张 */
   maxCount: number = 300;
-  /** aes 模式字段 */
+  /**
+   * aes 模式：正文图是「页面里一段 base64 密文，AES 解密后得到图片数组」。
+   * 典型是爱国漫/国漫网这类站：params='密文' + 固定密钥，CBC 解密出 JSON。
+   */
   aesKey: string = '';
+  /** aes 模式：提取密文的正则（有捕获组取第 1 组） */
   aesPattern: string = '';
+  /** aes 模式：IV 来源。cipher16 = 取密文前 16 字符；留空 = ECB 无 IV */
   aesIvSource: string = '';
+  /** aes 模式：解密后从明文里提取图片数组的正则（如 "images":\[(.*?)\]） */
   aesListPattern: string = '';
+  /**
+   * base64 模式：正文图是「base64 编码的 URL 列表」（如猫咪漫画 qTcms_S_m_murl_e）。
+   * pattern 提取 base64 密文 → 解码 → 按 separator 分割成 URL 列表。
+   */
+  separator: string = '';
 }
 
 export class SourceRule {
@@ -241,6 +276,16 @@ export function ruleFromJson(root: JsonNode): SourceRule {
     target.latest = str(search, 'latest', '');
     target.link = str(search, 'link', '');
     target.paged = bool(search, 'paged', false);
+    target.method = str(search, 'method', 'get');
+    target.body = str(search, 'body', '');
+    target.responseType = str(search, 'responseType', 'html');
+    target.jsonPath = str(search, 'jsonPath', '$');
+    target.jsonIdField = str(search, 'jsonIdField', 'id');
+    target.jsonTitleField = str(search, 'jsonTitleField', 'name');
+    target.jsonCoverField = str(search, 'jsonCoverField', 'cover');
+    target.jsonAuthorField = str(search, 'jsonAuthorField', 'author');
+    target.jsonLatestField = str(search, 'jsonLatestField', '');
+    target.jsonLinkTemplate = str(search, 'jsonLinkTemplate', '');
     target.emptyMarker = str(search, 'emptyMarker', '');
   }
 
@@ -264,8 +309,10 @@ export function ruleFromJson(root: JsonNode): SourceRule {
     target.id = str(chapters, 'id', '');
     target.title = str(chapters, 'title', '');
     target.link = str(chapters, 'link', '');
+    target.time = str(chapters, 'time', '');
     target.reverse = bool(chapters, 'reverse', false);
     target.fromDetailPage = bool(chapters, 'fromDetailPage', true);
+    target.mergeHtml = bool(chapters, 'mergeHtml', false);
     const jsonRule = chapters.get('json');
     if (jsonRule !== null) {
       target.json.source = str(jsonRule, 'source', '');
@@ -275,6 +322,7 @@ export function ruleFromJson(root: JsonNode): SourceRule {
       target.json.idField = str(jsonRule, 'idField', 'id');
       target.json.titleField = str(jsonRule, 'titleField', 'title');
       target.json.linkField = str(jsonRule, 'linkField', 'url');
+      target.json.timeField = str(jsonRule, 'timeField', '');
       target.json.baseUrl = str(jsonRule, 'baseUrl', '');
       target.json.method = str(jsonRule, 'method', 'get');
       target.json.body = str(jsonRule, 'body', '');
@@ -300,6 +348,7 @@ export function ruleFromJson(root: JsonNode): SourceRule {
     target.aesPattern = str(images, 'aesPattern', '');
     target.aesIvSource = str(images, 'aesIvSource', '');
     target.aesListPattern = str(images, 'aesListPattern', '');
+    target.separator = str(images, 'separator', '');
   }
 
   const browse = root.get('browse');

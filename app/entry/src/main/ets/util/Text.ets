@@ -201,3 +201,20 @@ export function chapterNumber(title: string): number {
   }
   return -1;
 }
+
+/**
+ * 章节更新时间压缩成一行短文本，方便塞在章节格子/目录行里。
+ * `2026-11-02 01:53:30` → `11-02`；`2023-12-06` → `12-06`；
+ * 认不出来的原样返回（最多 10 字），不至于显示成空白。
+ */
+export function shortTime(raw: string): string {
+  const full = raw.match(new RegExp('(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})'));
+  if (full !== null) {
+    return `${full[2]}-${full[3]}`;
+  }
+  const short = raw.match(new RegExp('(\\d{1,2})[-/](\\d{1,2})'));
+  if (short !== null) {
+    return `${short[1]}-${short[2]}`;
+  }
+  return raw.length > 10 ? raw.substring(0, 10) : raw;
+}

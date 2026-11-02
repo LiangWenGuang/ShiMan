@@ -5,13 +5,13 @@ import { SourceRule } from '../rule/Rules';
 import { ComicDetail, ChapterBrief, ShelfItem, ReadProgress } from '../model/Models';
 import { Library } from '../store/Library';
 import { DetailParams, ReaderParams, SwitchParams } from '../model/RouteParams';
+import { SwitchBus, SwitchPending } from '../store/SwitchBus';
 import { RemoteImage } from '../view/RemoteImage';
 import { Theme } from '../theme/Theme';
+import { shortTime } from '../util/Text';
 
 /** 章节一次渲染多少条，避免上千章一次性铺开 */
 const CHAPTER_WINDOW_STEP: number = 120;
-/** 章节目录每行几个 */
-const CHAPTER_COLUMNS: number = 2;
 
 @Entry
 @Component
@@ -24,12 +24,16 @@ struct DetailPage {
   @State descExpanded: boolean = false;
   @State chapterWindow: number = CHAPTER_WINDOW_STEP;
   @State chapterDescending: boolean = false;
+  /** 章节目录每行几列（1 或 2），可切换并持久化 */
+  @State chapterColumns: number = 2;
   @State progressHint: string = '';
   @State resumeIndex: number = 0;
   /** 图源站点地址，作为封面下载 Referer */
   @State sourceBase: string = '';
   @State sourceName: string = '';
   private params: DetailParams = new DetailParams();
+  /** 换源后要对齐到的章节下标（-1 表示无） */
+  private switchAlignedIndex: number = -1;
 
   aboutToAppear(): void {
     const raw = router.getParams() as DetailParams;
@@ -37,6 +41,7 @@ struct DetailPage {
       this.params = raw;
     }
     this.chapterDescending = Library.get().isChapterDescending();
+    this.chapterColumns = Library.get().chapterColumns();
     this.load();
   }
 
@@ -46,7 +51,23 @@ struct DetailPage {
    */
   onPageShow(): void {
     this.chapterDescending = Library.get().isChapterDescending();
+    this.chapterColumns = Library.get().chapterColumns();
+    const pending = SwitchBus.take();
+    if (pending !== null && pending.sourceId.length > 0 && pending.sourceId !== this.params.sourceId) {
+      this.applySwitch(pending);
+      return;
+    }
     this.refreshProgress();
+  }
+
+  /** 从换源页返回：把新源带回来并重新加载 */
+  private applySwitch(pending: SwitchPending): void {
+    this.params.sourceId = pending.sourceId;
+    this.params.comicId = pending.comicId;
+    this.params.url = pending.url;
+    this.params.title = pending.title;
+    this.switchAlignedIndex = pending.chapterIndex >= 0 ? pending.chapterIndex : -1;
+    this.load();
   }
 
   private async load(): Promise<void> {
@@ -72,7 +93,17 @@ struct DetailPage {
     this.favorited = Library.get().isFavorite(this.params.sourceId, this.params.comicId);
     this.chapterWindow = Math.max(CHAPTER_WINDOW_STEP, Math.min(CHAPTER_WINDOW_STEP,
       (this.detail === null ? 0 : this.detail.chapters.length)));
-    this.refreshProgress();
+    if (this.switchAlignedIndex >= 0) {
+      // 换源后直接对齐到目标章，而不是沿用（新源可能没有的）旧进度
+      const total = this.detail.chapters.length;
+      const idx = this.switchAlignedIndex < total ? this.switchAlignedIndex : (total > 0 ? total - 1 : 0);
+      this.resumeIndex = idx;
+      this.progressHint = total > 0 ? `换源后对齐到 ${this.detail.chapters[idx].title}` : '';
+      this.ensureChapterVisible(idx);
+      this.switchAlignedIndex = -1;
+    } else {
+      this.refreshProgress();
+    }
   }
 
   /** 重新读取阅读进度，并同步「上次读到」与当前章高亮 */
@@ -204,14 +235,15 @@ struct DetailPage {
     router.pushUrl({ url: 'pages/SourceSwitchPage', params: params });
   }
 
-  /** 章节按两列切行，行内用 SpaceBetween 保证间距均匀 */
+  /** 章节按 1/2 列切行，行内用 SpaceBetween 保证间距均匀 */
   private chapterRows(items: ChapterBrief[]): ChapterBrief[][] {
     const visible = items.slice(0, this.chapterWindow);
+    const cols = this.chapterColumns === 1 ? 1 : 2;
     const rows: ChapterBrief[][] = [];
     let current: ChapterBrief[] = [];
     for (let i = 0; i < visible.length; i++) {
       current.push(visible[i]);
-      if (current.length === CHAPTER_COLUMNS) {
+      if (current.length === cols) {
         rows.push(current);
         current = [];
       }
@@ -222,16 +254,23 @@ struct DetailPage {
     return rows;
   }
 
+  /** 切换 1 列 / 2 列并持久化 */
+  private toggleChapterColumns(): void {
+    const next = this.chapterColumns === 1 ? 2 : 1;
+    this.chapterColumns = next;
+    Library.get().setChapterColumns(next);
+  }
+
   // ─────────────────────────── 版式块 ───────────────────────────
 
   @Builder
   navBar() {
     Row() {
       Row() {
-        Text('‹')
-          .fontSize(26)
-          .fontColor(Theme.text)
-          .margin({ right: 2 })
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(22)
+          .fontColor([Theme.text])
+          .margin({ right: 4 })
         Text('返回')
           .fontSize(Theme.fsBody)
           .fontColor(Theme.text)
@@ -462,9 +501,20 @@ struct DetailPage {
           .padding({ left: 10, right: 10, top: 5, bottom: 5 })
           .backgroundColor(Theme.accentDim)
           .borderRadius(Theme.radiusPill)
-          .margin({ right: Theme.gapM })
+          .margin({ right: Theme.gapS })
           .onClick(() => {
             this.toggleChapterOrder();
+          })
+        Text(this.chapterColumns === 1 ? '单列' : '双列')
+          .fontSize(Theme.fsLabel)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Theme.textSub)
+          .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+          .backgroundColor(Theme.surfaceHi)
+          .borderRadius(Theme.radiusPill)
+          .margin({ right: Theme.gapM })
+          .onClick(() => {
+            this.toggleChapterColumns();
           })
         Text(`${this.detail!.chapters.length} 话`)
           .fontSize(Theme.fsCaption)
@@ -476,24 +526,38 @@ struct DetailPage {
       ForEach(this.chapterRows(this.orderedChapters()), (row: ChapterBrief[]) => {
         Row() {
           ForEach(row, (chapter: ChapterBrief) => {
-            Text(chapter.title)
-              .fontSize(Theme.fsLabel)
-              .fontWeight(chapter.index === this.resumeIndex ? FontWeight.Medium : FontWeight.Normal)
-              .fontColor(chapter.index === this.resumeIndex ? Theme.accent : Theme.textSub)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('48.5%')
-              .height(44)
-              .padding({ left: 8, right: 8 })
-              .backgroundColor(chapter.index === this.resumeIndex ? Theme.accentDim : Theme.surface)
-              .borderRadius(Theme.radiusS + 2)
-              .textAlign(TextAlign.Center)
-              .onClick(() => {
-                this.openReader(chapter.index);
-              })
+            Column() {
+              Text(chapter.title)
+                .fontSize(Theme.fsLabel)
+                .fontWeight(chapter.index === this.resumeIndex ? FontWeight.Medium : FontWeight.Normal)
+                .fontColor(chapter.index === this.resumeIndex ? Theme.accent : Theme.textSub)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+                .textAlign(TextAlign.Center)
+              // 有更新时间就补一行小字，没有就保持原来的单行高度
+              if (chapter.time.length > 0) {
+                Text(shortTime(chapter.time))
+                  .fontSize(Theme.fsMicro)
+                  .fontColor(Theme.textDim)
+                  .maxLines(1)
+                  .margin({ top: 3 })
+                  .width('100%')
+                  .textAlign(TextAlign.Center)
+              }
+            }
+            .width(this.chapterColumns === 1 ? '100%' : '48.5%')
+            .height(chapter.time.length > 0 ? 56 : 44)
+            .justifyContent(FlexAlign.Center)
+            .padding({ left: 8, right: 8 })
+            .backgroundColor(chapter.index === this.resumeIndex ? Theme.accentDim : Theme.surface)
+            .borderRadius(Theme.radiusS + 2)
+            .onClick(() => {
+              this.openReader(chapter.index);
+            })
           }, (chapter: ChapterBrief) => `${chapter.chapterId}_${chapter.index}`)
-          if (row.length < CHAPTER_COLUMNS) {
-            Column().width('48.5%')
+          if (row.length < this.chapterColumns) {
+            Column().width(this.chapterColumns === 1 ? '100%' : '48.5%')
           }
         }
         .width('100%')

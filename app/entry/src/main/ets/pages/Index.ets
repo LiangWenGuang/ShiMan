@@ -1,7 +1,7 @@
 import { router, promptAction } from '@kit.ArkUI';
 import { SourceRegistry } from '../source/SourceRegistry';
 import { SourceApi } from '../source/SourceApi';
-import { SourceRule, BrowseRule } from '../rule/Rules';
+import { SourceRule } from '../rule/Rules';
 import { ComicBrief, ShelfItem, ReadProgress } from '../model/Models';
 import { Library } from '../store/Library';
 import { ComicCard } from '../view/ComicCard';
@@ -12,20 +12,59 @@ import { Theme } from '../theme/Theme';
 /** 网格每行卡片数 */
 const COLUMNS: number = 3;
 
+/** 首页聚合时每批并发的源数量：太多会被站点限流，太少又慢 */
+const DISCOVER_BATCH: number = 4;
+
+/**
+ * 标题归一化，用于跨源去重。
+ * 「一人之下」和「一人 之下！」在不同站写法不同，但其实是同一部。
+ */
+function normalizeTitle(value: string): string {
+  return value.replace(new RegExp('[\\s\\-_·:：!！?？()（）\\[\\]【】<>《》]', 'g'), '').toLowerCase();
+}
+
+/**
+ * 把各源的结果轮流交叉排：第一行能看到 3 个不同来源。
+ * 不交叉的话首屏会被第一个源（漫客栈 40 本）整片占满，
+ * 用户会以为「全部图源」其实只有一家。
+ */
+function interleave(buckets: ComicBrief[][]): ComicBrief[] {
+  const out: ComicBrief[] = [];
+  let maxLen: number = 0;
+  for (let i = 0; i < buckets.length; i++) {
+    maxLen = Math.max(maxLen, buckets[i].length);
+  }
+  for (let col = 0; col < maxLen; col++) {
+    for (let i = 0; i < buckets.length; i++) {
+      if (col < buckets[i].length) {
+        out.push(buckets[i][col]);
+      }
+    }
+  }
+  return out;
+}
+
 @Entry
 @Component
 struct Index {
   @State currentTab: number = 0;
 
-  // 发现
+  // 发现（首页）
   @State sources: SourceRule[] = [];
   @State currentSourceId: string = '';
   @State currentSourceName: string = '';
+  /** true = 只看当前图源（默认）；false = 全部图源聚合 */
+  @State homeCurrentOnly: boolean = true;
+  /** 当前图源提供的分类入口 */
   @State browseNames: string[] = [];
   @State browseIndex: number = 0;
   @State discover: ComicBrief[] = [];
   @State discoverLoading: boolean = false;
   @State discoverError: string = '';
+  /** 聚合进度文案，如 "8/22" */
+  @State discoverProgress: string = '';
+  /** 并发令牌：重新聚合时让上一轮的迟到结果作废 */
+  private discoverToken: number = 0;
 
   // 搜索
   @State keyword: string = '';
@@ -36,6 +75,10 @@ struct Index {
   @State searchDone: boolean = false;
   @State searchHistoryShown: boolean = false;
   @State searchHistoryItems: string[] = [];
+  /** 切当前检索源的自定义深色弹窗 */
+  @State sourceSheetShown: boolean = false;
+  /** 搜索框失焦令牌：延迟隐藏历史，避免点历史项时先被 blur 隐藏 */
+  private blurToken: number = 0;
 
   // 书架 / 收藏
   @State shelf: ShelfItem[] = [];
@@ -44,16 +87,16 @@ struct Index {
 
   aboutToAppear(): void {
     this.refreshSources();
-    this.loadDiscover(0);
+    this.loadHome();
   }
 
   onPageShow(): void {
-    // 记住切换前的源：从「图源管理」改了当前源回来时要重新拉发现页，
-    // 否则分类标签换了、下面的漫画还是上一个源的内容
+    // 记住切换前的源：从「图源管理」改了当前源回来时要重拉，
+    // 否则首页还是上一个源的内容
     const previousSourceId = this.currentSourceId;
     this.refreshSources();
-    if (previousSourceId !== this.currentSourceId && this.currentSourceId.length > 0) {
-      this.loadDiscover(0);
+    if (previousSourceId !== this.currentSourceId && this.homeCurrentOnly) {
+      this.loadHome();
     }
     this.shelf = Library.get().shelf();
     this.favorites = Library.get().favorites();
@@ -79,9 +122,32 @@ struct Index {
     }
   }
 
-  private async loadDiscover(index: number): Promise<void> {
+  /** 按当前模式加载首页 */
+  private loadHome(): void {
+    if (this.homeCurrentOnly) {
+      this.loadDiscoverForCurrent(this.browseIndex);
+    } else {
+      this.loadDiscoverAll();
+    }
+  }
+
+  private switchHomeScope(currentOnly: boolean): void {
+    if (this.homeCurrentOnly === currentOnly) {
+      return;
+    }
+    this.homeCurrentOnly = currentOnly;
+    // 换模式先清空，避免上一种模式的列表残留一瞬
+    this.discover = [];
+    this.discoverError = '';
+    this.loadHome();
+  }
+
+  /** 只看当前图源：拉它某一个分类入口（默认第一个） */
+  private async loadDiscoverForCurrent(index: number): Promise<void> {
     const registry = SourceRegistry.get();
     const rule = registry.find(registry.currentSourceId());
+    // 令聚合那一路的迟到结果作废
+    this.discoverToken++;
     if (rule === null) {
       this.discover = [];
       this.discoverError = '还没有可用图源\n请到「我的 → 图源管理」启用';
@@ -89,21 +155,89 @@ struct Index {
     }
     if (rule.browse.length === 0) {
       this.discover = [];
-      this.discoverError = '当前图源未提供分类入口\n可直接用「搜索」找漫画';
+      this.discoverError = `${rule.name} 没有提供分类入口\n可直接用「搜索」找漫画`;
       return;
     }
     const safeIndex = index < 0 || index >= rule.browse.length ? 0 : index;
     this.browseIndex = safeIndex;
     this.discoverLoading = true;
     this.discoverError = '';
-    const entry: BrowseRule = rule.browse[safeIndex];
-    const outcome = await SourceApi.browse(rule, entry, 1);
+    const outcome = await SourceApi.browse(rule, rule.browse[safeIndex], 1);
     this.discoverLoading = false;
     if (outcome.ok && outcome.value !== undefined) {
       this.discover = outcome.value;
     } else {
       this.discover = [];
       this.discoverError = outcome.message;
+    }
+  }
+
+  /**
+   * 首页 = 全部图源聚合。
+   *
+   * 每个源取它自己的第一个 browse 入口（各站的「首页 / 最近更新」），分批并发拉，
+   * 边拉到边渲染，用户不用等 20 多个源全回来才看到东西。
+   * 同名漫画只留第一次出现的（跨源去重），保留来源标签方便用户挑。
+   */
+  private async loadDiscoverAll(): Promise<void> {
+    const list = SourceRegistry.get().enabled();
+    const token = ++this.discoverToken;
+    this.discoverLoading = true;
+    this.discoverError = '';
+    this.discover = [];
+    this.discoverProgress = `0/${list.length}`;
+    if (list.length === 0) {
+      this.discoverLoading = false;
+      this.discoverError = '还没有可用图源\n请到「我的 → 图源管理」启用';
+      return;
+    }
+
+    const buckets: ComicBrief[][] = [];
+    const seenTitles: string[] = [];
+    for (let start = 0; start < list.length; start += DISCOVER_BATCH) {
+      const end = Math.min(list.length, start + DISCOVER_BATCH);
+      const tasks: Promise<void>[] = [];
+      for (let k = start; k < end; k++) {
+        const rule: SourceRule = list[k];
+        if (rule.browse.length === 0) {
+          continue;
+        }
+        tasks.push(this.collectSource(rule, buckets, seenTitles));
+      }
+      await Promise.all(tasks);
+      // 上一轮聚合还没结束就又被触发了，直接把这一轮丢弃
+      if (token !== this.discoverToken) {
+        return;
+      }
+      this.discoverProgress = `${end}/${list.length}`;
+      this.discover = interleave(buckets);
+    }
+
+    this.discoverLoading = false;
+    if (this.discover.length === 0) {
+      this.discoverError = '暂时没取到内容\n检查网络后重试，或到「搜索」里找漫画';
+    }
+  }
+
+  /** 拉单个源的首页入口，结果按源分桶（同名去重） */
+  private async collectSource(rule: SourceRule, buckets: ComicBrief[][], seenTitles: string[]): Promise<void> {
+    const outcome = await SourceApi.browse(rule, rule.browse[0], 1);
+    if (!outcome.ok || outcome.value === undefined) {
+      return;
+    }
+    const items: ComicBrief[] = outcome.value;
+    const bucket: ComicBrief[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const key = normalizeTitle(item.title);
+      if (key.length === 0 || seenTitles.indexOf(key) >= 0) {
+        continue;
+      }
+      seenTitles.push(key);
+      bucket.push(item);
+    }
+    if (bucket.length > 0) {
+      buckets.push(bucket);
     }
   }
 
@@ -209,6 +343,10 @@ struct Index {
 
   private openSourceManager(): void {
     router.pushUrl({ url: 'pages/SourceManagerPage' });
+  }
+
+  private openCategory(): void {
+    router.pushUrl({ url: 'pages/CategoryPage' });
   }
 
   /** 每行三张卡，避免 Grid 嵌在滚动容器里的高度问题 */
@@ -338,19 +476,6 @@ struct Index {
           .fontWeight(FontWeight.Bold)
           .fontColor(Theme.text)
           .letterSpacing(0.5)
-        Row() {
-          Text(this.currentSourceName)
-            .fontSize(Theme.fsLabel)
-            .fontColor(Theme.textSub)
-          Text('·')
-            .fontSize(Theme.fsLabel)
-            .fontColor(Theme.textDim)
-            .margin({ left: 6, right: 6 })
-          Text('无广告 · 免登录')
-            .fontSize(Theme.fsLabel)
-            .fontColor(Theme.textDim)
-        }
-        .margin({ top: 5 })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
@@ -377,30 +502,137 @@ struct Index {
     .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapM, bottom: Theme.gapL })
   }
 
+  /** 首页顶部的范围切换：只看当前图源 / 全部图源 */
   @Builder
-  chipRow() {
-    Scroll() {
+  scopeToggle(label: string, currentOnly: boolean) {
+    Text(label)
+      .fontSize(Theme.fsLabel)
+      .fontWeight(this.homeCurrentOnly === currentOnly ? FontWeight.Medium : FontWeight.Normal)
+      .fontColor(this.homeCurrentOnly === currentOnly ? Theme.onAccent : Theme.textSub)
+      .height(30)
+      .padding({ left: 16, right: 16 })
+      .backgroundColor(this.homeCurrentOnly === currentOnly ? Theme.accent : Color.Transparent)
+      .borderRadius(Theme.radiusPill)
+      .textAlign(TextAlign.Center)
+      .onClick(() => {
+        this.switchHomeScope(currentOnly);
+      })
+  }
+
+  /** 首页范围行：分段控件 + 当前源（可点换源）+ 刷新 */
+  @Builder
+  homeScopeBar() {
+    Row() {
       Row() {
-        ForEach(this.browseNames, (name: string, index: number) => {
-          Text(name)
-            .fontSize(Theme.fsLabel + 1)
-            .fontWeight(index === this.browseIndex ? FontWeight.Medium : FontWeight.Normal)
-            .fontColor(index === this.browseIndex ? Theme.onAccent : Theme.textSub)
-            .height(34)
-            .padding({ left: 16, right: 16 })
-            .backgroundColor(index === this.browseIndex ? Theme.accent : Theme.surface)
-            .borderRadius(Theme.radiusPill)
-            .margin({ right: Theme.gapS + 2 })
-            .onClick(() => {
-              this.loadDiscover(index);
-            })
-        }, (name: string, index: number) => `${name}_${index}`)
+        this.scopeToggle('当前图源', true)
+        this.scopeToggle('全部图源', false)
       }
-      .padding({ left: Theme.gapL, right: Theme.gapL })
+      .padding(3)
+      .backgroundColor(Theme.surface)
+      .borderRadius(Theme.radiusPill)
+
+      if (this.homeCurrentOnly) {
+        Row() {
+          Text(this.currentSourceName)
+            .fontSize(Theme.fsLabel)
+            .fontColor(Theme.textSub)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          SymbolGlyph($r('sys.symbol.chevron_down'))
+            .fontSize(13)
+            .fontColor([Theme.textDim])
+            .margin({ left: 6 })
+        }
+        .height(36)
+        .padding({ left: 16, right: 14 })
+        .backgroundColor(Theme.surface)
+        .borderRadius(Theme.radiusPill)
+        .margin({ left: Theme.gapS })
+        .onClick(() => {
+          this.pickCurrentSource();
+        })
+      }
+
+      Blank()
+
+      Row() {
+        SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+          .fontSize(15)
+          .fontColor([Theme.accent])
+      }
+      .width(36)
+      .height(36)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(Theme.surface)
+      .borderRadius(Theme.radiusPill)
+      .onClick(() => {
+        this.loadHome();
+      })
     }
-    .scrollable(ScrollDirection.Horizontal)
-    .scrollBar(BarState.Off)
     .width('100%')
+    .padding({ left: Theme.gapL, right: Theme.gapL, bottom: Theme.gapM })
+  }
+
+  /** 当前源有多个分类（顶漫画 3 个、漫客栈 14 个）时给一排分类胶囊 */
+  @Builder
+  homeCategoryRow() {
+    if (this.homeCurrentOnly && this.browseNames.length > 1) {
+      Scroll() {
+        Row() {
+          ForEach(this.browseNames, (name: string, index: number) => {
+            Text(name)
+              .fontSize(Theme.fsLabel)
+              .fontWeight(index === this.browseIndex ? FontWeight.Medium : FontWeight.Normal)
+              .fontColor(index === this.browseIndex ? Theme.onAccent : Theme.textSub)
+              .height(32)
+              .padding({ left: 14, right: 14 })
+              .backgroundColor(index === this.browseIndex ? Theme.accent : Theme.surface)
+              .borderRadius(Theme.radiusPill)
+              .margin({ right: Theme.gapS })
+              .textAlign(TextAlign.Center)
+              .onClick(() => {
+                this.loadDiscoverForCurrent(index);
+              })
+          }, (name: string, index: number) => `home_cat_${index}_${name}`)
+        }
+        .padding({ left: Theme.gapL, right: Theme.gapL })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+      .padding({ bottom: Theme.gapM })
+    }
+  }
+
+  /** 首页副栏：加载中显示进度，加载完显示总数 */
+  @Builder
+  discoverStatusBar() {
+    if (this.discoverLoading) {
+      Row() {
+        LoadingProgress()
+          .width(13)
+          .height(13)
+          .color(Theme.accent)
+        Text(this.homeCurrentOnly
+          ? '正在加载当前图源…'
+          : `正在聚合全部图源 ${this.discoverProgress}…`)
+          .fontSize(Theme.fsCaption)
+          .fontColor(Theme.textDim)
+          .margin({ left: 8 })
+      }
+      .width('100%')
+      .padding({ left: Theme.gapL, right: Theme.gapL, bottom: Theme.gapM })
+    } else if (this.discover.length > 0) {
+      Row() {
+        Text(this.homeCurrentOnly
+          ? `${this.currentSourceName} · ${this.discover.length} 部`
+          : `全部图源 · ${this.discover.length} 部`)
+          .fontSize(Theme.fsCaption)
+          .fontColor(Theme.textDim)
+      }
+      .width('100%')
+      .padding({ left: Theme.gapL, right: Theme.gapL, bottom: Theme.gapM })
+    }
   }
 
   @Builder
@@ -449,24 +681,27 @@ struct Index {
   discoverTab() {
     Column() {
       this.appHeader()
-      this.chipRow()
-      if (this.discoverLoading) {
-        this.loadingBlock('正在加载分类…')
-      } else if (this.discoverError.length > 0) {
+      this.homeScopeBar()
+      this.homeCategoryRow()
+      this.discoverStatusBar()
+      if (this.discover.length === 0 && this.discoverLoading) {
+        this.loadingBlock(this.homeCurrentOnly ? '正在加载当前图源…' : '正在聚合全部图源…')
+      } else if (this.discover.length === 0 && this.discoverError.length > 0) {
         this.emptyBlock(this.discoverError, '', '重新加载', () => {
-          this.loadDiscover(this.browseIndex);
+          this.loadHome();
         })
       } else if (this.discover.length === 0) {
-        this.emptyBlock('这个分类暂时没有内容', '换个分类试试，或到「搜索」里找找', '重新加载', () => {
-          this.loadDiscover(this.browseIndex);
+        this.emptyBlock('暂时没有内容', '到「搜索」里找找，或稍后刷新', '重新加载', () => {
+          this.loadHome();
         })
       } else {
         List() {
           ListItem() {
             Column() {
-              this.comicGrid(this.discover)
+              // 只看当前图源时不重复标注来源；聚合模式才加来源标签
+              this.comicGrid(this.discover, !this.homeCurrentOnly)
             }
-            .padding({ left: Theme.gapM, right: Theme.gapM, top: Theme.gapL })
+            .padding({ left: Theme.gapM, right: Theme.gapM, top: Theme.gapS })
           }
         }
         .layoutWeight(1)
@@ -522,8 +757,18 @@ struct Index {
             this.doSearch();
           })
           .onFocus(() => {
+            this.blurToken++;
             this.searchHistoryItems = Library.get().searchHistory().slice(0, 10);
             this.searchHistoryShown = true;
+          })
+          .onBlur(() => {
+            // 失焦后延迟一小会再退出历史，给「点历史项」留出触发时间
+            const token = ++this.blurToken;
+            setTimeout(() => {
+              if (token === this.blurToken) {
+                this.searchHistoryShown = false;
+              }
+            }, 200);
           })
       }
       .height(46)
@@ -543,6 +788,21 @@ struct Index {
         .onClick(() => {
           this.doSearch();
         })
+
+      Row() {
+        SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+          .fontSize(18)
+          .fontColor([Theme.accent])
+      }
+      .width(46)
+      .height(46)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(Theme.surface)
+      .borderRadius(Theme.radiusM)
+      .margin({ left: Theme.gapS })
+      .onClick(() => {
+        this.openCategory();
+      })
     }
     .width('100%')
     .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapL })
@@ -553,8 +813,8 @@ struct Index {
     Row() {
       Column() {
         Row() {
-          this.scopePill('仅当前源', false)
           this.scopePill('全部图源', true)
+          this.scopePill('仅当前源', false)
         }
         .padding(3)
         .backgroundColor(Theme.surface)
@@ -565,16 +825,19 @@ struct Index {
       if (!this.searchAll) {
         Row() {
           Text(this.currentSourceName)
-            .fontSize(Theme.fsCaption)
+            .fontSize(Theme.fsLabel)
             .fontColor(Theme.textSub)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           SymbolGlyph($r('sys.symbol.chevron_down'))
-            .fontSize(11)
+            .fontSize(13)
             .fontColor([Theme.textDim])
-            .margin({ left: 5 })
+            .margin({ left: 6 })
         }
-        .padding({ left: 12, right: 10, top: 5, bottom: 5 })
+        // 左侧是「30 内高 + 3 上下内边距 = 36」的分段控件，
+        // 这里必须也是 36，否则右边这颗看起来会小一号
+        .height(36)
+        .padding({ left: 16, right: 14 })
         .backgroundColor(Theme.surface)
         .borderRadius(Theme.radiusPill)
         .margin({ left: Theme.gapS })
@@ -593,41 +856,123 @@ struct Index {
     .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapM })
   }
 
-  /** 弹源列表，切当前检索源 */
+  /** 弹出深色源列表，切当前检索源 */
   private pickCurrentSource(): void {
-    const registry = SourceRegistry.get();
-    const list = registry.enabled();
-    const sheets: SheetInfo[] = [];
-    for (let i = 0; i < list.length; i++) {
-      const rule = list[i];
-      const title = rule.id === this.currentSourceId ? `✓ ${rule.name}` : rule.name;
-      sheets.push({
-        title: title,
-        action: () => {
-          this.switchCurrentSource(rule.id);
-        }
-      });
-    }
-    if (sheets.length === 0) {
+    if (this.sources.length === 0) {
       return;
     }
-    ActionSheet.show({
-      title: '选择当前检索图源',
-      message: '仅对「仅当前源」的搜索与发现页生效',
-      sheets: sheets,
-      cancel: () => {
-      }
-    });
+    this.sourceSheetShown = true;
   }
 
   private async switchCurrentSource(id: string): Promise<void> {
     await SourceRegistry.get().setCurrent(id);
     this.refreshSources();
-    // 切了源，发现页要跟着换
-    if (this.currentSourceId.length > 0) {
-      this.loadDiscover(0);
+    // 「只看当前图源」模式下换源必须重拉首页；聚合模式不受影响
+    if (this.homeCurrentOnly) {
+      this.browseIndex = 0;
+      this.loadDiscoverForCurrent(0);
     }
     promptAction.showToast({ message: `已切换到 ${this.currentSourceName}` });
+  }
+
+  /** 深色底部的「选择当前检索图源」弹窗，替代系统白色 ActionSheet */
+  @Builder
+  sourceSheet() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      // 半透明遮罩，点击关闭
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor('#99000000')
+        .onClick(() => {
+          this.sourceSheetShown = false;
+        })
+
+      Column() {
+        Row()
+          .width(36)
+          .height(4)
+          .backgroundColor(Theme.line)
+          .borderRadius(2)
+          .margin({ top: 10, bottom: 2 })
+
+        Row() {
+          Text('选择当前检索图源')
+            .fontSize(Theme.fsHeadline)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Theme.text)
+            .layoutWeight(1)
+          Text(`${this.sources.length} 个源`)
+            .fontSize(Theme.fsCaption)
+            .fontColor(Theme.textDim)
+        }
+        .width('100%')
+        .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapM })
+
+        Text('仅对「仅当前源」的搜索与发现页生效')
+          .fontSize(Theme.fsCaption)
+          .fontColor(Theme.textDim)
+          .width('100%')
+          .padding({ left: Theme.gapL, right: Theme.gapL, top: 4 })
+
+        List() {
+          ForEach(this.sources, (rule: SourceRule) => {
+            ListItem() {
+              Row() {
+                Text(rule.name)
+                  .fontSize(Theme.fsBody)
+                  .fontWeight(rule.id === this.currentSourceId ? FontWeight.Medium : FontWeight.Normal)
+                  .fontColor(rule.id === this.currentSourceId ? Theme.accent : Theme.text)
+                  .layoutWeight(1)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                if (rule.id === this.currentSourceId) {
+                  SymbolGlyph($r('sys.symbol.checkmark'))
+                    .fontSize(17)
+                    .fontColor([Theme.accent])
+                    .margin({ left: Theme.gapS })
+                }
+              }
+              .width('100%')
+              .height(56)
+              .padding({ left: Theme.gapL, right: Theme.gapL })
+              .backgroundColor(rule.id === this.currentSourceId ? Theme.accentDim : Theme.surfaceHi)
+              .borderRadius(Theme.radiusM)
+              .onClick(() => {
+                this.sourceSheetShown = false;
+                this.switchCurrentSource(rule.id);
+              })
+            }
+            .margin({ left: Theme.gapL, right: Theme.gapL, bottom: Theme.gapS })
+          }, (rule: SourceRule) => `srcpick_${rule.id}`)
+        }
+        .layoutWeight(1)
+        .scrollBar(BarState.Off)
+        .margin({ top: Theme.gapS })
+
+        Button('取消')
+          .width('100%')
+          .height(50)
+          .fontSize(Theme.fsBody)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Theme.textSub)
+          .backgroundColor(Theme.surfaceHi)
+          .borderRadius(Theme.radiusM)
+          .margin({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapS, bottom: Theme.gapL })
+          .onClick(() => {
+            this.sourceSheetShown = false;
+          })
+      }
+      .width('100%')
+      .height('64%')
+      .backgroundColor(Theme.surface)
+      .borderRadius({ topLeft: Theme.radiusL, topRight: Theme.radiusL })
+      .onClick(() => {
+        // 占位：阻止点击弹窗空白处冒泡到遮罩
+      })
+    }
+    .width('100%')
+    .height('100%')
   }
 
   /** 点历史项：回填关键词并搜索 */
@@ -795,6 +1140,13 @@ struct Index {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .margin({ top: 3 })
         .width('100%')
+      Text(this.sourceNameOf(item.sourceId))
+        .fontSize(Theme.fsMicro)
+        .fontColor(Theme.accent)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 3 })
+        .width('100%')
     }
     .width(104)
     .margin({ right: Theme.gapM })
@@ -805,8 +1157,31 @@ struct Index {
       params.comicUrl = item.url;
       params.chapterIndex = item.chapterIndex;
       params.chapterId = item.chapterId;
+      params.page = item.page;
       router.pushUrl({ url: 'pages/ReaderPage', params: params });
     })
+    .gesture(LongPressGesture().onAction(() => {
+      this.confirmDeleteHistory(item);
+    }))
+  }
+
+  /** 长按继续阅读卡删除该条记录 */
+  private confirmDeleteHistory(item: ReadProgress): void {
+    promptAction.showDialog({
+      title: '删除阅读记录',
+      message: `确定删除「${item.title}」的阅读记录吗？`,
+      buttons: [
+        { text: '取消', color: Theme.textSub },
+        { text: '删除', color: '#E5493C' }
+      ]
+    }).then((result: promptAction.ShowDialogSuccessResponse) => {
+      if (result.index === 1) {
+        Library.get().removeProgress(item.sourceId, item.comicId);
+        this.history = Library.get().history();
+      }
+    }).catch(() => {
+      // 用户取消或对话框异常，忽略
+    });
   }
 
   @Builder
@@ -1073,8 +1448,9 @@ struct Index {
   // ─────────────────────────── 骨架 ───────────────────────────
 
   build() {
-    Column() {
-      Tabs({ barPosition: BarPosition.End, index: this.currentTab }) {
+    Stack() {
+      Column() {
+        Tabs({ barPosition: BarPosition.End, index: this.currentTab }) {
         TabContent() {
           this.discoverTab()
         }.tabBar(this.tabLabel('发现', $r('sys.symbol.house'), $r('sys.symbol.house_fill'), 0))
@@ -1101,10 +1477,17 @@ struct Index {
           this.history = Library.get().history();
         }
       })
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Theme.bg)
+
+      if (this.sourceSheetShown) {
+        this.sourceSheet()
+      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(Theme.bg)
   }
 
   @Builder

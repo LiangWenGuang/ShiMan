@@ -15,6 +15,8 @@ export class ReaderParams {
   chapterIndex: number = 0;
   /** 从书架/历史进入时直接定位的章节 id */
   chapterId: string = '';
+  /** 从书架/历史继续阅读时，恢复到这一页（0 起） */
+  page: number = 0;
 }
 
 export class SwitchParams {

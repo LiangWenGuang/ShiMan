@@ -17,10 +17,10 @@ struct SettingsPage {
   navBar() {
     Row() {
       Row() {
-        Text('‹')
-          .fontSize(26)
-          .fontColor(Theme.text)
-          .margin({ right: 2 })
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(22)
+          .fontColor([Theme.text])
+          .margin({ right: 4 })
         Text('返回')
           .fontSize(Theme.fsBody)
           .fontColor(Theme.text)

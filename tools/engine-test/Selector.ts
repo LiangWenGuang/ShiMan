@@ -74,6 +74,20 @@ function parseCompound(raw: string): Compound {
         }
       }
       compound.tag = raw.substring(begin, i).toLowerCase();
+
+      // 标签名扫描允许了 ':'（照顾 `o:p` 这类带命名空间的老页面），
+      // 但副作用是 `p:eq(1)` 会被吞成 tag='p:eq'，后面的伪类再也解析不到 ——
+      // 表现是「带标签的伪类一律取不到值，只有裸 :eq() 能生效」。
+      // 这里把「:已知伪类名」之前的部分切回标签，指针退回伪类起点。
+      const colon = compound.tag.indexOf(':');
+      if (colon > 0) {
+        const tail = compound.tag.substring(colon + 1);
+        if (tail === 'eq' || tail === 'contains' || tail === 'first-child' ||
+          tail === 'last-child' || tail === 'nth-child') {
+          compound.tag = compound.tag.substring(0, colon);
+          i = begin + colon;
+        }
+      }
     }
   }
 

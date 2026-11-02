@@ -27,6 +27,8 @@ export class ChapterBrief {
   url: string = '';
   /** 在源内的顺序，从 0 开始 */
   index: number = 0;
+  /** 更新时间的原始文本；站点没给就是空串 */
+  time: string = '';
 }
 
 /** 漫画详情 */

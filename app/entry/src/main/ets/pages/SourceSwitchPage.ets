@@ -3,7 +3,8 @@ import { SourceRegistry } from '../source/SourceRegistry';
 import { SourceApi } from '../source/SourceApi';
 import { SourceRule } from '../rule/Rules';
 import { ComicBrief, ComicDetail, ChapterBrief, SwitchCandidate } from '../model/Models';
-import { SwitchParams, ReaderParams } from '../model/RouteParams';
+import { SwitchParams } from '../model/RouteParams';
+import { SwitchBus, SwitchPending } from '../store/SwitchBus';
 import { chapterNumber } from '../util/Text';
 import { RemoteImage } from '../view/RemoteImage';
 import { Theme } from '../theme/Theme';
@@ -41,6 +42,13 @@ function similarity(left: string, right: string): number {
   return hit / Math.max(a.length, b.length);
 }
 
+/** 单源搜索命中的 top-N 结果（并行阶段用） */
+class SearchHit {
+  rule: SourceRule = new SourceRule();
+  hits: ComicBrief[] = [];
+  scores: number[] = [];
+}
+
 @Entry
 @Component
 struct SourceSwitchPage {
@@ -58,86 +66,101 @@ struct SourceSwitchPage {
     this.collect();
   }
 
+  private async searchOne(rule: SourceRule): Promise<SearchHit | null> {
+    const outcome = await SourceApi.search(rule, this.params.title, 1);
+    if (!outcome.ok || outcome.value === undefined) {
+      return null;
+    }
+    const ranked: ComicBrief[] = [];
+    const scores: number[] = [];
+    for (let k = 0; k < outcome.value.length; k++) {
+      const hit = outcome.value[k];
+      const score = similarity(this.params.title, hit.title);
+      if (score < 0.6) {
+        continue;
+      }
+      let pos = ranked.length;
+      for (let a = 0; a < ranked.length; a++) {
+        if (scores[a] < score) {
+          pos = a;
+          break;
+        }
+      }
+      ranked.splice(pos, 0, hit);
+      scores.splice(pos, 0, score);
+    }
+    const result = new SearchHit();
+    result.rule = rule;
+    result.hits = ranked.slice(0, 2);
+    result.scores = scores.slice(0, 2);
+    return result;
+  }
+
+  private async detailOne(rule: SourceRule, brief: ComicBrief, score: number): Promise<SwitchCandidate> {
+    const candidate = new SwitchCandidate();
+    candidate.sourceId = rule.id;
+    candidate.sourceName = rule.name;
+    candidate.comicId = brief.comicId;
+    candidate.title = brief.title;
+    candidate.cover = brief.cover;
+    candidate.url = brief.url;
+    candidate.similarity = score;
+    const detailOutcome = await SourceApi.detail(rule, brief.comicId, brief.url);
+    if (!detailOutcome.ok || detailOutcome.value === undefined) {
+      candidate.error = detailOutcome.message;
+      return candidate;
+    }
+    const detail: ComicDetail = detailOutcome.value;
+    candidate.comicId = detail.comicId;
+    candidate.title = detail.title;
+    candidate.cover = detail.cover.length > 0 ? detail.cover : brief.cover;
+    candidate.author = detail.author;
+    candidate.url = detail.url;
+    candidate.chapterCount = detail.chapters.length;
+    candidate.similarity = similarity(this.params.title, detail.title);
+    const latest = detail.chapters[detail.chapters.length - 1];
+    candidate.latestTitle = latest === undefined ? '' : latest.title;
+    candidate.alignedChapterIndex = this.alignChapter(detail.chapters, chapterNumber(this.params.chapterTitle));
+    const aligned = detail.chapters[candidate.alignedChapterIndex];
+    candidate.alignedChapterTitle = aligned === undefined ? '' : aligned.title;
+    return candidate;
+  }
+
   private async collect(): Promise<void> {
     const registry = SourceRegistry.get();
     const all = registry.enabled();
-    const targetNumber = chapterNumber(this.params.chapterTitle);
     const found: SwitchCandidate[] = [];
-    let scanned = 0;
 
+    // 阶段一：并行搜索所有其他源（不同域名互不影响，比串行快一个数量级）
+    const targetRules: SourceRule[] = [];
     for (let i = 0; i < all.length; i++) {
-      const rule: SourceRule = all[i];
-      // 换源只列「别的源」；把当前源排除掉，否则会出现 100% 匹配自己这种噪音
-      if (rule.id === this.params.sourceId) {
+      if (all[i].id === this.params.sourceId) {
         continue;
       }
-      scanned++;
-      this.progressText = `已扫描 ${scanned}/${all.length - 1} 个源`;
-      const outcome = await SourceApi.search(rule, this.params.title, 1);
-      if (!outcome.ok || outcome.value === undefined) {
-        continue;
-      }
-      // 先按标题相似度挑出最像的几条，再逐个补详情
-      const ranked: ComicBrief[] = [];
-      const scores: number[] = [];
-      for (let k = 0; k < outcome.value.length; k++) {
-        const hit = outcome.value[k];
-        const score = similarity(this.params.title, hit.title);
-        if (score < 0.6) {
-          continue;
-        }
-        ranked.push(hit);
-        scores.push(score);
-      }
-      // 简单插入排序，避免依赖数组排序回调的稳定性
-      for (let a = 1; a < ranked.length; a++) {
-        let b = a;
-        while (b > 0 && scores[b] > scores[b - 1]) {
-          const tmpHit = ranked[b];
-          ranked[b] = ranked[b - 1];
-          ranked[b - 1] = tmpHit;
-          const tmpScore = scores[b];
-          scores[b] = scores[b - 1];
-          scores[b - 1] = tmpScore;
-          b--;
-        }
-      }
+      targetRules.push(all[i]);
+    }
+    this.progressText = `正在并行检索 ${targetRules.length} 个源…`;
+    const searchPromises: Promise<SearchHit | null>[] = [];
+    for (let i = 0; i < targetRules.length; i++) {
+      searchPromises.push(this.searchOne(targetRules[i]));
+    }
+    const searchOutcomes = await Promise.all(searchPromises);
 
-      const limit = Math.min(2, ranked.length);
-      for (let k = 0; k < limit; k++) {
-        const hit = ranked[k];
-        const detailOutcome = await SourceApi.detail(rule, hit.comicId, hit.url);
-        if (!detailOutcome.ok || detailOutcome.value === undefined) {
-          const failed = new SwitchCandidate();
-          failed.sourceId = rule.id;
-          failed.sourceName = rule.name;
-          failed.comicId = hit.comicId;
-          failed.title = hit.title;
-          failed.cover = hit.cover;
-          failed.url = hit.url;
-          failed.similarity = scores[k];
-          failed.error = detailOutcome.message;
-          found.push(failed);
-          continue;
-        }
-        const detail: ComicDetail = detailOutcome.value;
-        const candidate = new SwitchCandidate();
-        candidate.sourceId = rule.id;
-        candidate.sourceName = rule.name;
-        candidate.comicId = detail.comicId;
-        candidate.title = detail.title;
-        candidate.cover = detail.cover.length > 0 ? detail.cover : hit.cover;
-        candidate.author = detail.author;
-        candidate.url = detail.url;
-        candidate.chapterCount = detail.chapters.length;
-        candidate.similarity = similarity(this.params.title, detail.title);
-        const latest = detail.chapters[detail.chapters.length - 1];
-        candidate.latestTitle = latest === undefined ? '' : latest.title;
-        candidate.alignedChapterIndex = this.alignChapter(detail.chapters, targetNumber);
-        const aligned = detail.chapters[candidate.alignedChapterIndex];
-        candidate.alignedChapterTitle = aligned === undefined ? '' : aligned.title;
-        found.push(candidate);
+    // 阶段二：并行拉取各候选的详情（拿到章节数并对齐章节）
+    const detailPromises: Promise<SwitchCandidate>[] = [];
+    for (let i = 0; i < searchOutcomes.length; i++) {
+      const hit = searchOutcomes[i];
+      if (hit === null) {
+        continue;
       }
+      for (let k = 0; k < hit.hits.length; k++) {
+        detailPromises.push(this.detailOne(hit.rule, hit.hits[k], hit.scores[k]));
+      }
+    }
+    this.progressText = `正在比对 ${detailPromises.length} 个候选…`;
+    const candidates = await Promise.all(detailPromises);
+    for (let i = 0; i < candidates.length; i++) {
+      found.push(candidates[i]);
     }
 
     // 按相似度降序
@@ -179,17 +202,21 @@ struct SourceSwitchPage {
     return index >= chapters.length ? chapters.length - 1 : index;
   }
 
-  private hop(candidate: SwitchCandidate): void {
+  private async hop(candidate: SwitchCandidate): Promise<void> {
     if (candidate.error.length > 0) {
       promptAction.showToast({ message: `该源详情读取失败：${candidate.error}` });
       return;
     }
-    const params: ReaderParams = new ReaderParams();
-    params.sourceId = candidate.sourceId;
-    params.comicId = candidate.comicId;
-    params.comicUrl = candidate.url;
-    params.chapterIndex = candidate.alignedChapterIndex;
-    router.replaceUrl({ url: 'pages/ReaderPage', params: params });
+    // 记下当前源（持久化到下次切换），并让详情页/阅读器接管新源，退回作品界面
+    await SourceRegistry.get().setCurrent(candidate.sourceId);
+    const pending = new SwitchPending();
+    pending.sourceId = candidate.sourceId;
+    pending.comicId = candidate.comicId;
+    pending.url = candidate.url;
+    pending.title = candidate.title;
+    pending.chapterIndex = candidate.alignedChapterIndex;
+    SwitchBus.put(pending);
+    router.back();
   }
 
   private refererOf(sourceId: string): string {
@@ -203,10 +230,10 @@ struct SourceSwitchPage {
   navBar() {
     Row() {
       Row() {
-        Text('‹')
-          .fontSize(26)
-          .fontColor(Theme.text)
-          .margin({ right: 2 })
+        SymbolGlyph($r('sys.symbol.chevron_left'))
+          .fontSize(22)
+          .fontColor([Theme.text])
+          .margin({ right: 4 })
         Text('返回')
           .fontSize(Theme.fsBody)
           .fontColor(Theme.text)

@@ -6,6 +6,7 @@
     "pages/SourceManagerPage",
     "pages/SourceSwitchPage",
     "pages/SettingsPage",
-    "pages/FavoritesPage"
+    "pages/FavoritesPage",
+    "pages/CategoryPage"
   ]
 }

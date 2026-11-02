@@ -23,6 +23,11 @@ app/build-profile.json5
 hap/
 *.hap
 *.hsp
+# 例外：发版目录里的安装包要跟仓库一起走，方便发给人下载
+!releases/*.hap
+
+# ── 已下架的图源规则（本地备份，不入库；需要时从 git 历史里找回来）──
+app/entry/src/main/resources/rawfile/sources/_disabled/
 
 # ── 开发期探测缓存 ──
 tools/dumps/

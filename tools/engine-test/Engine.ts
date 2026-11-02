@@ -11,6 +11,9 @@ import { JsonNode, JsonKind, parseJson, selectPath } from './Json.ts';
 import { resolveUrl, decodeEntities, compact, extractNumericId, applyTemplate, toHttps } from './Text.ts';
 import { ComicBrief, ChapterBrief, PageImage } from './Models.ts';
 import { SourceRule, HeaderPair } from './Rules.ts';
+import { cryptoFramework } from './kitshim.ts';
+import { buffer } from './kitshim.ts';
+import { util } from './kitshim.ts';
 
 /** 模板变量表 */
 export class UrlVars {
@@ -197,6 +200,9 @@ export function parseListItems(
   const doc = parseHtml(html);
   const items = queryAll(doc, listSelector);
   const result: ComicBrief[] = [];
+  // 首页常有多个推荐区块、同一本漫画重复出现；重复的 comicId 会让 ForEach
+  // 的 key 冲突，这里统一按 comicId 去重（保留首次出现）。
+  const seen: string[] = [];
   for (let i = 0; i < items.length; i++) {
     const node = items[i];
     const title = evalField(node, titleExpr);
@@ -212,6 +218,10 @@ export function parseListItems(
     if (id.length === 0) {
       id = url;
     }
+    if (seen.indexOf(id) >= 0) {
+      continue;
+    }
+    seen.push(id);
     const brief = new ComicBrief();
     brief.sourceId = sourceId;
     brief.comicId = id;
@@ -221,6 +231,65 @@ export function parseListItems(
     brief.cover = cover.length > 0 ? toHttps(resolveUrl(baseUrl, cover)) : '';
     brief.author = authorExpr.length > 0 ? evalField(node, authorExpr) : '';
     brief.latest = latestExpr.length > 0 ? evalField(node, latestExpr) : '';
+    result.push(brief);
+  }
+  return result;
+}
+
+/** JSON 型搜索结果（读漫屋等站的搜索接口返回 JSON 数组，不是 HTML） */
+export function parseSearchFromJson(text: string, rule: SourceRule, baseUrl: string): ComicBrief[] {
+  const result: ComicBrief[] = [];
+  if (text.trim().length === 0) {
+    return result;
+  }
+  const root = parseJson(text);
+  const nodes = selectPath(root, rule.search.jsonPath);
+  const flat: JsonNode[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node.kind === JsonKind.Array) {
+      for (let k = 0; k < node.items.length; k++) {
+        flat.push(node.items[k]);
+      }
+    } else {
+      flat.push(node);
+    }
+  }
+  const seen: string[] = [];
+  for (let i = 0; i < flat.length; i++) {
+    const item = flat[i];
+    if (item.kind !== JsonKind.Object) {
+      continue;
+    }
+    const titleNode = item.get(rule.search.jsonTitleField);
+    const title = titleNode === null ? '' : titleNode.asString().trim();
+    if (title.length === 0) {
+      continue;
+    }
+    const idNode = item.get(rule.search.jsonIdField);
+    const id = idNode === null ? '' : idNode.asString().trim();
+    if (id.length === 0 || seen.indexOf(id) >= 0) {
+      continue;
+    }
+    seen.push(id);
+    const coverNode = item.get(rule.search.jsonCoverField);
+    const cover = coverNode === null ? '' : coverNode.asString().trim();
+    const authorNode = item.get(rule.search.jsonAuthorField);
+    const author = authorNode === null ? '' : authorNode.asString().trim();
+    const latestNode = rule.search.jsonLatestField.length > 0
+      ? item.get(rule.search.jsonLatestField) : null;
+    const latest = latestNode === null ? '' : latestNode.asString().trim();
+    const link = rule.search.jsonLinkTemplate.length > 0
+      ? rule.search.jsonLinkTemplate.split('{id}').join(id)
+      : id;
+    const brief = new ComicBrief();
+    brief.sourceId = rule.id;
+    brief.comicId = id;
+    brief.title = title;
+    brief.url = resolveUrl(baseUrl, link);
+    brief.cover = cover.length > 0 ? toHttps(resolveUrl(baseUrl, cover)) : '';
+    brief.author = author;
+    brief.latest = latest;
     result.push(brief);
   }
   return result;
@@ -254,14 +323,14 @@ export function parseDetailFields(
 }
 
 /** 解析章节列表 */
-export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: string): ChapterBrief[] {
+export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: string, applyReverse: boolean = true): ChapterBrief[] {
   const items = queryAll(doc, rule.chapters.listSelector);
   const chapters: ChapterBrief[] = [];
   for (let i = 0; i < items.length; i++) {
     const node = items[i];
     const title = evalField(node, rule.chapters.title);
     const link = evalField(node, rule.chapters.link);
-    if (link.length === 0) {
+    if (link.length === 0 || link.indexOf('javascript:') === 0 || link.indexOf('#') === 0) {
       continue;
     }
     const url = resolveUrl(pageUrl, link);
@@ -277,9 +346,12 @@ export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: stri
     chapter.title = title.length > 0 ? title : `第 ${i + 1} 话`;
     chapter.url = url;
     chapter.index = i;
+    if (rule.chapters.time.length > 0) {
+      chapter.time = compact(evalField(node, rule.chapters.time));
+    }
     chapters.push(chapter);
   }
-  if (rule.chapters.reverse) {
+  if (rule.chapters.reverse && applyReverse) {
     chapters.reverse();
     for (let i = 0; i < chapters.length; i++) {
       chapters[i].index = i;
@@ -298,7 +370,13 @@ export function readEmbeddedJson(doc: HtmlDocument, selector: string): string {
 }
 
 /** 解析 JSON 型的章节列表 */
-export function parseChaptersFromJson(text: string, rule: SourceRule, pageUrl: string): ChapterBrief[] {
+export function parseChaptersFromJson(
+  text: string,
+  rule: SourceRule,
+  pageUrl: string,
+  comicId: string = '',
+  applyReverse: boolean = true
+): ChapterBrief[] {
   if (text.trim().length === 0) {
     return [];
   }
@@ -336,16 +414,22 @@ export function parseChaptersFromJson(text: string, rule: SourceRule, pageUrl: s
     let link = linkRaw;
     // 接口只给 id 不给地址的站点，按模板拼（`/chapter/{contentId}-{id}.html`）
     if (link.length === 0 && rule.chapters.json.linkTemplate.length > 0) {
-      link = applyJsonTemplate(item, rule.chapters.json.linkTemplate);
+      link = applyJsonTemplate(item, rule.chapters.json.linkTemplate, comicId);
     }
     const chapter = new ChapterBrief();
     chapter.chapterId = id.length > 0 ? id : extractNumericId(linkRaw);
     chapter.title = titleNode === null ? `第 ${i + 1} 话` : titleNode.asString();
     chapter.url = link.length > 0 ? resolveUrl(base, link) : base;
     chapter.index = i;
+    if (rule.chapters.json.timeField.length > 0) {
+      const timeNode = item.get(rule.chapters.json.timeField);
+      if (timeNode !== null) {
+        chapter.time = compact(timeNode.asString());
+      }
+    }
     chapters.push(chapter);
   }
-  if (rule.chapters.reverse) {
+  if (rule.chapters.reverse && applyReverse) {
     chapters.reverse();
     for (let i = 0; i < chapters.length; i++) {
       chapters[i].index = i;
@@ -357,8 +441,9 @@ export function parseChaptersFromJson(text: string, rule: SourceRule, pageUrl: s
 /**
  * 用 JSON 条目的字段拼地址：`/chapter/{contentId}-{id}.html`。
  * 花括号里写字段名，取不到就留空，避免拼出 `undefined`。
+ * 额外支持 `{comicId}` 这类规则级变量（由调用方传入）。
  */
-function applyJsonTemplate(item: JsonNode, template: string): string {
+function applyJsonTemplate(item: JsonNode, template: string, comicId: string = ''): string {
   const tokens = template.match(new RegExp('\\{[A-Za-z0-9_]+\\}', 'g'));
   let result = template;
   if (tokens === null) {
@@ -367,11 +452,35 @@ function applyJsonTemplate(item: JsonNode, template: string): string {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     const name = token.substring(1, token.length - 1);
-    const node = item.get(name);
-    const value = node === null ? '' : node.asString();
+    let value = '';
+    if (name === 'comicId') {
+      value = comicId;
+    } else {
+      const node = item.get(name);
+      value = node === null ? '' : node.asString();
+    }
     result = result.split(token).join(value);
   }
   return result;
+}
+
+/** 合并两批章节，按 URL 去重，保持先 first 后 second 的顺序 */
+export function mergeChapters(first: ChapterBrief[], second: ChapterBrief[]): ChapterBrief[] {
+  const seen: string[] = [];
+  const out: ChapterBrief[] = [];
+  for (let i = 0; i < first.length; i++) {
+    if (seen.indexOf(first[i].url) < 0) {
+      seen.push(first[i].url);
+      out.push(first[i]);
+    }
+  }
+  for (let i = 0; i < second.length; i++) {
+    if (seen.indexOf(second[i].url) < 0) {
+      seen.push(second[i].url);
+      out.push(second[i]);
+    }
+  }
+  return out;
 }
 
 /** JSON 类源的图片解析 */
@@ -491,7 +600,8 @@ function firstCapture(text: string, pattern: string): string {  let regex: RegEx
 }
 
 /** 正则类源的图片解析：从原始 HTML 里直接抠地址 */
-export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: string): PageImage[] {  const images: PageImage[] = [];
+export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: string): PageImage[] {
+  const images: PageImage[] = [];
   if (rule.images.pattern.length === 0) {
     return images;
   }
@@ -513,13 +623,18 @@ export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: st
     if (raw === undefined) {
       raw = '';
     }
-    const url = raw.trim();
-    if (url.length > 0 && seen.indexOf(url) < 0) {
-      seen.push(url);
-      const image = new PageImage();
-      image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
-      image.referer = pageUrl;
-      images.push(image);
+    // 捕获到的可能是一个 URL，也可能是「一串 URL 连在一起」（如
+    // current_chapter:{...chapter_img_list:["url1","url2",...]} 这种内联数组），
+    // 这里统一拆开，逐个去重入列。
+    for (let u = 0; u < splitUrls(raw).length; u++) {
+      const url = splitUrls(raw)[u];
+      if (url.length > 0 && seen.indexOf(url) < 0) {
+        seen.push(url);
+        const image = new PageImage();
+        image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
+        image.referer = pageUrl;
+        images.push(image);
+      }
     }
     // 零长度匹配保护：否则 exec 会原地打转
     if (match.index === regex.lastIndex) {
@@ -528,6 +643,30 @@ export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: st
     match = regex.exec(html);
   }
   return images;
+}
+
+/** 把「可能是多个 URL 拼在一起」的捕获串拆成独立 URL 列表 */
+function splitUrls(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+  // 内联数组形如 `"url1","url2",...`，直接按引号拆；
+  // 拆出来的每一段里只要以 http(s):// 或 // 开头，就当作一个 URL。
+  const pieces = trimmed.split('"');
+  const out: string[] = [];
+  for (let i = 0; i < pieces.length; i++) {
+    const piece = pieces[i].trim();
+    if (piece.indexOf('http://') === 0 || piece.indexOf('https://') === 0 ||
+      piece.indexOf('//') === 0) {
+      out.push(piece);
+    }
+  }
+  // 没拆出多个（比如单条 URL 或其它形态），按原串兜底
+  if (out.length === 0) {
+    out.push(trimmed);
+  }
+  return out;
 }
 
 /** 从页面里找出所有疑似图片地址（web 模式的兜底） */
@@ -547,6 +686,138 @@ export function guessImages(html: string, pageUrl: string): PageImage[] {
     if (images.length > 0 && images[images.length - 1].url === url) {
       continue;
     }
+    const image = new PageImage();
+    image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
+    image.referer = pageUrl;
+    images.push(image);
+  }
+  return images;
+}
+
+/**
+ * AES-CBC 解密（针对爱国漫/国漫网这类站）。
+ * 密文是 base64，密钥固定，CBC 模式的 IV 取密文前 16 字符的 UTF-8 字节。
+ */
+export async function decryptAesCbc(cipherBase64: string, key: string, ivText: string): Promise<string> {
+  try {
+    const base64Helper = new util.Base64Helper();
+    const cipherBytes: Uint8Array = base64Helper.decodeSync(cipherBase64);
+
+    const keyBytes: Uint8Array = new Uint8Array(buffer.from(key, 'utf-8').buffer);
+    const symKeyBlob: cryptoFramework.DataBlob = { data: keyBytes };
+    const keyGenerator = cryptoFramework.createSymKeyGenerator('AES128');
+    const symKey = await keyGenerator.convertKey(symKeyBlob);
+
+    const ivBytes: Uint8Array = new Uint8Array(buffer.from(ivText, 'utf-8').buffer);
+    const ivParams: cryptoFramework.IvParamsSpec = {
+      algName: 'IvParamsSpec',
+      iv: { data: ivBytes }
+    };
+
+    const cipher = cryptoFramework.createCipher('AES128|CBC|PKCS5');
+    await cipher.init(cryptoFramework.CryptoMode.DECRYPT_MODE, symKey, ivParams);
+    const plainData: cryptoFramework.DataBlob = await cipher.doFinal({ data: cipherBytes });
+    const plainBytes = new Uint8Array(plainData.data);
+    return buffer.from(plainBytes.buffer).toString('utf-8');
+  } catch (error) {
+    return '';
+  }
+}
+
+/** 取正则第一个捕获组（无捕获组取整个匹配） */
+function firstCaptureOf(text: string, pattern: string): string {
+  try {
+    const regex = new RegExp(pattern);
+    const match = regex.exec(text);
+    if (match === null) {
+      return '';
+    }
+    const value = match.length > 1 ? match[1] : match[0];
+    return value === undefined ? '' : value;
+  } catch (error) {
+    return '';
+  }
+}
+
+/**
+ * aes 模式的图片解析：页面里有一段 base64 密文，AES 解密后是含图片数组的 JSON。
+ * 流程：正则提取密文 → AES-CBC 解密 → 正则提取图片数组 → 按引号拆成 URL 列表。
+ */
+export async function parseImagesFromAes(html: string, rule: SourceRule, pageUrl: string): Promise<PageImage[]> {
+  const images: PageImage[] = [];
+  if (rule.images.aesKey.length === 0 || rule.images.aesPattern.length === 0) {
+    return images;
+  }
+  const cipherText = firstCaptureOf(html, rule.images.aesPattern).trim();
+  if (cipherText.length === 0) {
+    return images;
+  }
+  // IV 来源：默认取密文前 16 字符
+  const ivText = rule.images.aesIvSource === 'cipher16' ? cipherText.substring(0, 16) : '';
+  const plain = await decryptAesCbc(cipherText, rule.images.aesKey, ivText);
+  if (plain.length === 0) {
+    return images;
+  }
+  // 从解密后的明文里提取图片数组
+  let raw = plain;
+  if (rule.images.aesListPattern.length > 0) {
+    const matched = firstCaptureOf(plain, rule.images.aesListPattern);
+    if (matched.length > 0) {
+      raw = matched;
+    }
+  }
+  // 按引号拆出 URL（解密后的 JSON 里图片地址是 "..." 格式，可能带 \/ 转义）
+  const unescaped = raw.split('\\/').join('/');
+  const seen: string[] = [];
+  const urls = splitUrls(unescaped);
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    if (url.length === 0 || seen.indexOf(url) >= 0) {
+      continue;
+    }
+    seen.push(url);
+    const image = new PageImage();
+    image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
+    image.referer = pageUrl;
+    images.push(image);
+  }
+  return images;
+}
+
+/**
+ * base64 模式的图片解析（猫咪漫画 qTcms 系）。
+ * 页面里 `qTcms_S_m_murl_e = "<base64>"`，解码后是多个图片地址，
+ * 用 `$qingtiandy$` 这类分隔符串起来。
+ */
+export function parseImagesFromBase64(html: string, rule: SourceRule, pageUrl: string): PageImage[] {
+  const images: PageImage[] = [];
+  if (rule.images.pattern.length === 0) {
+    return images;
+  }
+  const raw = firstCaptureOf(html, rule.images.pattern).trim();
+  if (raw.length === 0) {
+    return images;
+  }
+  let decoded = '';
+  try {
+    const helper = new util.Base64Helper();
+    const bytes: Uint8Array = helper.decodeSync(raw);
+    decoded = buffer.from(bytes.buffer).toString('utf-8');
+  } catch (error) {
+    return images;
+  }
+  const separator = rule.images.separator.length > 0 ? rule.images.separator : '\n';
+  const parts = decoded.split(separator);
+  const seen: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const url = parts[i].trim();
+    if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) {
+      continue;
+    }
+    if (seen.indexOf(url) >= 0) {
+      continue;
+    }
+    seen.push(url);
     const image = new PageImage();
     image.url = toHttps(url.startsWith('//') ? 'https:' + url : url);
     image.referer = pageUrl;

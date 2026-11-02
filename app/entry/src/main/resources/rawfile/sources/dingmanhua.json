@@ -5,7 +5,10 @@
   "charset": "utf-8",
   "note": "搜索/详情/目录都是纯 HTML；正文图由「前缀+序号」拼出，直接下载，无需执行网页脚本",
   "headers": [
-    { "name": "Referer", "value": "https://www.dingmanhua.com/" }
+    {
+      "name": "Referer",
+      "value": "https://www.dingmanhua.com/"
+    }
   ],
   "search": {
     "url": "/search?query={kw}",
@@ -41,7 +44,8 @@
       "titleField": "chapterName",
       "linkField": "",
       "linkTemplate": "/chapter/{contentId}-{id}.html",
-      "baseUrl": "https://www.dingmanhua.com"
+      "baseUrl": "https://www.dingmanhua.com",
+      "timeField": "updatedAt"
     }
   },
   "images": {
@@ -59,7 +63,27 @@
       "list": ".manga-grid .manga-card",
       "title": ".manga-title@text",
       "cover": "img@attr:data-src||img@attr:src",
-      "link": "a@attr:href"
+      "link": "a@attr:href",
+      "latest": "span.chapter-badge@text"
+    },
+    {
+      "name": "最近更新",
+      "url": "/new",
+      "list": "a.update-item",
+      "title": "div.update-copy strong@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "author": "div.update-copy span@text",
+      "latest": "time@text"
+    },
+    {
+      "name": "人气排行",
+      "url": "/hot",
+      "list": "a.rank-card",
+      "title": "strong@text",
+      "cover": "img@attr:data-src||img@attr:src",
+      "link": "a@attr:href",
+      "latest": "span@text"
     }
   ]
 }

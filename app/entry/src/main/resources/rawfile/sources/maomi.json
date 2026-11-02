@@ -1,0 +1,67 @@
+{
+  "id": "maomi",
+  "name": "猫咪漫画",
+  "baseUrl": "https://www.sisimanhua.com",
+  "charset": "utf-8",
+  "note": "搜索/详情/目录/正文图全纯 HTTP，无需无头取图；正文图是 base64 编码的 URL 列表。与「丝丝漫画」同站不同端（此为 PC 端，内容可能重复）",
+  "headers": [
+    { "name": "Referer", "value": "https://www.sisimanhua.com/" }
+  ],
+  "search": {
+    "url": "/statics/search.aspx?key={kw}",
+    "list": "div.cy_list_mh ul",
+    "id": "",
+    "title": "li.title a@text",
+    "cover": "img@attr:src",
+    "link": "li.title a@attr:href",
+    "author": "li.zuozhe@text~s|状态[:：]\\s*||",
+    "latest": "li.updata span@text"
+  },
+  "detail": {
+    "title": "div.cy_title h1@text",
+    "cover": "div.cy_info_cover img@attr:src||div.cy_info_cover img@attr:data-src",
+    "author": "div.cy_xinxi span a@text",
+    "desc": "p#comic-description@text",
+    "status": "div.cy_xinxi span font@text",
+    "tags": "div.cy_xinxi span a@text"
+  },
+  "chapters": {
+    "list": "ul#mh-chapter-list-ol-0 li",
+    "id": "",
+    "title": "p@text",
+    "link": "a@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "base64",
+    "url": "{chapterUrl}",
+    "pattern": "qTcms_S_m_murl_e=\"(.*?)\";",
+    "separator": "$qingtiandy$"
+  },
+  "browse": [
+    {
+      "name": "热血",
+      "url": "/rexue/",
+      "list": "div.cy_list_mh ul",
+      "title": "li.title a@text",
+      "cover": "img@attr:src",
+      "link": "li.title a@attr:href"
+    },
+    {
+      "name": "恋爱",
+      "url": "/lianai/",
+      "list": "div.cy_list_mh ul",
+      "title": "li.title a@text",
+      "cover": "img@attr:src",
+      "link": "li.title a@attr:href"
+    },
+    {
+      "name": "校园",
+      "url": "/xiaoyuan/",
+      "list": "div.cy_list_mh ul",
+      "title": "li.title a@text",
+      "cover": "img@attr:src",
+      "link": "li.title a@attr:href"
+    }
+  ]
+}

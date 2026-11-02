@@ -45,12 +45,40 @@
   },
   "browse": [
     {
-      "name": "全部漫画",
-      "url": "/list/",
+      "name": "国产漫画",
+      "url": "/category/list/1",
       "list": "li.stui-vodlist__item",
       "title": "a.stui-vodlist__thumb@attr:title",
       "cover": "a.stui-vodlist__thumb@attr:data-original",
-      "link": "a.stui-vodlist__thumb@attr:href"
+      "link": "a.stui-vodlist__thumb@attr:href",
+      "latest": "span.pic-text@text"
+    },
+    {
+      "name": "日本漫画",
+      "url": "/category/list/2",
+      "list": "li.stui-vodlist__item",
+      "title": "a.stui-vodlist__thumb@attr:title",
+      "cover": "a.stui-vodlist__thumb@attr:data-original",
+      "link": "a.stui-vodlist__thumb@attr:href",
+      "latest": "span.pic-text@text"
+    },
+    {
+      "name": "韩国漫画",
+      "url": "/category/list/3",
+      "list": "li.stui-vodlist__item",
+      "title": "a.stui-vodlist__thumb@attr:title",
+      "cover": "a.stui-vodlist__thumb@attr:data-original",
+      "link": "a.stui-vodlist__thumb@attr:href",
+      "latest": "span.pic-text@text"
+    },
+    {
+      "name": "欧美漫画",
+      "url": "/category/list/4",
+      "list": "li.stui-vodlist__item",
+      "title": "a.stui-vodlist__thumb@attr:title",
+      "cover": "a.stui-vodlist__thumb@attr:data-original",
+      "link": "a.stui-vodlist__thumb@attr:href",
+      "latest": "span.pic-text@text"
     }
   ]
 }

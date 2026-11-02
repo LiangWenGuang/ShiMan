@@ -1,0 +1,43 @@
+{
+  "id": "mhzhan",
+  "name": "漫画栈",
+  "baseUrl": "https://www.manhuazhan.com",
+  "charset": "utf-8",
+  "note": "搜索/详情/目录为纯 HTML；正文图由页面脚本解密后渲染，走无头取图。本机网络受限未实测，需真机验证",
+  "headers": [
+    { "name": "Referer", "value": "https://www.manhuazhan.com/" }
+  ],
+  "search": {
+    "url": "/index.php/search?key={kw}",
+    "list": "div#contents a",
+    "id": "",
+    "title": "h3@text",
+    "cover": "img@attr:data-original||img@attr:data-src||img@attr:src",
+    "link": "@attr:href",
+    "author": "p@text",
+    "latest": ""
+  },
+  "detail": {
+    "title": "div.wp h1@text",
+    "cover": "div.d-vod-pic img@attr:src",
+    "author": "",
+    "desc": "div.d-des@text",
+    "status": "",
+    "tags": ""
+  },
+  "chapters": {
+    "list": "div.d-player-list a",
+    "id": "",
+    "title": "@text",
+    "link": "@attr:href",
+    "reverse": false
+  },
+  "images": {
+    "type": "web",
+    "url": "{chapterUrl}",
+    "readySelector": "img[data-src], .comic-content img, .chapter-content img",
+    "extract": "attr:data-src",
+    "settleMs": 4500
+  },
+  "browse": []
+}
