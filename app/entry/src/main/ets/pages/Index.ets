@@ -8,6 +8,7 @@ import { ComicCard } from '../view/ComicCard';
 import { RemoteImage } from '../view/RemoteImage';
 import { DetailParams, ReaderParams } from '../model/RouteParams';
 import { Theme } from '../theme/Theme';
+import { appVersionLabel } from '../util/AppInfo';
 
 /** 网格每行卡片数 */
 const COLUMNS: number = 3;
@@ -1541,7 +1542,7 @@ struct Index {
         .backgroundColor(Theme.surface)
         .borderRadius(Theme.radiusL)
 
-        Text('拾漫 1.0.2')
+        Text(appVersionLabel())
           .fontSize(Theme.fsMicro)
           .fontColor(Theme.textDim)
           .margin({ top: Theme.gapXl + 8, bottom: 28 })
