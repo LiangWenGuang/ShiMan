@@ -361,6 +361,45 @@ struct CategoryPage {
   }
 
   /** 右侧内容区（左侧栏模式与 chips 模式共用） */
+  /**
+   * 失败提示。文案在 builder 里直接读 this.error —— 传参进 @Builder 会冻结在
+   * 第一次渲染的字符串上，换源后错误信息就留在上一条不动了。
+   */
+  /**
+   * 失败提示。文案必须在这里**自己渲染**并直接读 this.error ——
+   * 不管是传参给本 builder，还是再转手传给 stateBlock()，字符串都会被冻结在
+   * 第一次渲染那一刻，换源后的新错误信息就显示不出来。
+   */
+  @Builder
+  errorBlock() {
+    Column() {
+      SymbolGlyph($r('sys.symbol.exclamationmark_circle'))
+        .fontSize(38)
+        .fontColor([Theme.line])
+      Text(this.error)
+        .fontSize(Theme.fsBody)
+        .fontColor(Theme.textSub)
+        .textAlign(TextAlign.Center)
+        .margin({ top: Theme.gapL })
+        .padding({ left: 24, right: 24 })
+      Button('重新加载')
+        .fontSize(Theme.fsLabel)
+        .fontWeight(FontWeight.Medium)
+        .height(40)
+        .padding({ left: 24, right: 24 })
+        .margin({ top: Theme.gapXl })
+        .backgroundColor(Theme.surfaceHi)
+        .fontColor(Theme.accent)
+        .borderRadius(Theme.radiusPill)
+        .onClick(() => {
+          this.loadBrowse(this.browseIndex);
+        })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+  }
+
   @Builder
   listArea() {
     if (this.loading) {
@@ -375,9 +414,7 @@ struct CategoryPage {
       .layoutWeight(1)
       .justifyContent(FlexAlign.Center)
     } else if (this.error.length > 0) {
-      this.stateBlock($r('sys.symbol.exclamationmark_circle'), this.error, '', '重新加载', () => {
-        this.loadBrowse(this.browseIndex);
-      })
+      this.errorBlock()
     } else if (this.comics.length === 0) {
       this.stateBlock($r('sys.symbol.list_bullet'), '这个榜单暂时没有内容', '换个榜单试试', '重新加载', () => {
         this.loadBrowse(this.browseIndex);
@@ -418,10 +455,32 @@ struct CategoryPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else if (this.browseNames.length === 0) {
-        this.stateBlock($r('sys.symbol.list_bullet'), this.error.length > 0 ? this.error : '当前图源没有排行榜',
-          '换一个数据源试试', '重新加载', () => {
-            this.loadBrowse(0);
-          })
+        Column() {
+          SymbolGlyph($r('sys.symbol.list_bullet'))
+            .fontSize(38)
+            .fontColor([Theme.line])
+          Text(this.error.length > 0 ? this.error : '当前图源没有排行榜')
+            .fontSize(Theme.fsBody)
+            .fontColor(Theme.textSub)
+            .textAlign(TextAlign.Center)
+            .margin({ top: Theme.gapL })
+            .padding({ left: 24, right: 24 })
+          Button('换一个数据源试试')
+            .fontSize(Theme.fsLabel)
+            .fontWeight(FontWeight.Medium)
+            .height(40)
+            .padding({ left: 24, right: 24 })
+            .margin({ top: Theme.gapXl })
+            .backgroundColor(Theme.surfaceHi)
+            .fontColor(Theme.accent)
+            .borderRadius(Theme.radiusPill)
+            .onClick(() => {
+              this.loadBrowse(0);
+            })
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
       } else if (this.useRail()) {
         Row() {
           this.typeColumn()

@@ -219,7 +219,14 @@ struct SourceManagerPage {
             this.card(item)
           }
           .padding({ left: Theme.gapL, right: Theme.gapL })
-        }, (item: SourceState) => item.rule.id)
+        }, (item: SourceState) => {
+          // key 只写 id 的话：启用开关、自检「检测中/结果」、「当前」标记都不会刷新
+          // （card 是 @Builder 按值传参，行不重建就等于冻结在第一次渲染）
+          const on = item.enabled ? 'on' : 'off';
+          const ck = item.checking ? 'ck' : '';
+          const cur = item.rule.id === this.currentId ? 'cur' : '';
+          return `sm_${item.rule.id}_${on}_${ck}_${item.result.length}_${cur}`;
+        })
       }
       .layoutWeight(1)
       .scrollBar(BarState.Off)

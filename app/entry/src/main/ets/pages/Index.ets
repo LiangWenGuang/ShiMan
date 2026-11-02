@@ -421,8 +421,14 @@ struct Index {
   // ─────────────────────────── 通用版式块 ───────────────────────────
 
   /** 分区标题：左侧竖条 + 标题 + 右侧计数 */
+  /**
+   * 分组标题。
+   * hint 由调用方按 key 传入、**在 builder 里现算**，不能直接把
+   * `${this.history.length} 条记录` 这种字符串当参数传 —— @Builder 按值传参，
+   * 传进去那一刻的字符串就固定了，条数变了标题不会跟着变。
+   */
   @Builder
-  sectionTitle(title: string, hint: string) {
+  sectionTitle(title: string, hintKey: string) {
     Row() {
       Column()
         .width(3)
@@ -435,8 +441,8 @@ struct Index {
         .fontColor(Theme.text)
         .margin({ left: 8 })
       Blank()
-      if (hint.length > 0) {
-        Text(hint)
+      if (this.sectionHint(hintKey).length > 0) {
+        Text(this.sectionHint(hintKey))
           .fontSize(Theme.fsCaption)
           .fontColor(Theme.textDim)
       }
@@ -445,14 +451,40 @@ struct Index {
     .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapXl, bottom: Theme.gapM })
   }
 
-  /** 居中占位：图标 + 主文案 + 副文案 + 可选按钮 */
+  /** 分组标题右侧的副文案，读 @State 保证随数据变化更新 */
+  private sectionHint(key: string): string {
+    if (key === 'history') {
+      return this.history.length > 0 ? `${this.history.length} 条记录` : '';
+    }
+    if (key === 'shelf') {
+      return this.shelf.length > 0 ? `${this.shelf.length} 本` : '';
+    }
+    return '';
+  }
+
+  /** 占位块正文：stateKey 非空时读对应 @State，保证错误文案能随状态更新 */
+  private stateText(key: string, fallback: string): string {
+    if (key === 'homeError') {
+      return this.discoverError.length > 0 ? this.discoverError : fallback;
+    }
+    if (key === 'searchError') {
+      return this.searchError.length > 0 ? this.searchError : fallback;
+    }
+    return fallback;
+  }
+
+  /**
+   * 居中占位：图标 + 主文案 + 副文案 + 可选按钮。
+   * 错误文案通过 stateKey 传「哪个状态」，在 builder 内部现读 —— 
+   * 直接把 this.discoverError 当参数传会被冻结在第一次渲染的字符串上。
+   */
   @Builder
-  emptyBlock(title: string, hint: string, action: string, onAction: () => void) {
+  emptyBlock(title: string, hint: string, action: string, onAction: () => void, stateKey: string) {
     Column() {
       SymbolGlyph($r('sys.symbol.magnifyingglass'))
         .fontSize(38)
         .fontColor([Theme.line])
-      Text(title)
+      Text(this.stateText(stateKey, title))
         .fontSize(Theme.fsBody)
         .fontColor(Theme.textSub)
         .textAlign(TextAlign.Center)
@@ -669,6 +701,12 @@ struct Index {
     return `row_${index}_${row.length}_${head}`;
   }
 
+  /** 书架行的 key，同样要带内容，否则增删后条数相同时不重排 */
+  private shelfRowKey(row: ShelfItem[], index: number): string {
+    const head = row.length > 0 ? `${row[0].sourceId}_${row[0].comicId}` : 'empty';
+    return `srow_${index}_${row.length}_${head}`;
+  }
+
   /**
    * 首页网格。
    *
@@ -732,13 +770,13 @@ struct Index {
       if (this.discover.length === 0 && this.discoverLoading) {
         this.loadingBlock(this.homeCurrentOnly ? '正在加载当前图源…' : '正在聚合全部图源…')
       } else if (this.discover.length === 0 && this.discoverError.length > 0) {
-        this.emptyBlock(this.discoverError, '', '重新加载', () => {
+        this.emptyBlock('', '', '重新加载', () => {
           this.refreshHome();
-        })
+        }, 'homeError')
       } else if (this.discover.length === 0) {
         this.emptyBlock('暂时没有内容', '到「搜索」里找找，或下拉刷新', '重新加载', () => {
           this.refreshHome();
-        })
+        }, '')
       } else {
         // 下拉刷新：Refresh 的子树必须是可滚动组件，List 正好
         Refresh({ refreshing: this.refreshing }) {
@@ -1109,15 +1147,15 @@ struct Index {
         this.loadingBlock('正在各源检索…')
       } else if (this.searchResults.length === 0) {
         if (this.searchDone && this.searchError.length > 0) {
-          this.emptyBlock(this.searchError, '', '清空重来', () => {
+          this.emptyBlock('', '', '清空重来', () => {
             this.keyword = '';
             this.searchDone = false;
             this.searchResults = [];
             this.searchError = '';
-          })
+          }, 'searchError')
         } else {
           this.emptyBlock('还没有搜索', '输入关键词，可在全部图源中一次找完', '', () => {
-          })
+          }, '')
         }
       } else {
         List() {
@@ -1279,14 +1317,14 @@ struct Index {
     List() {
       if (this.history.length > 0) {
         ListItem() {
-          this.sectionTitle('继续阅读', `${this.history.length} 条记录`)
+          this.sectionTitle('继续阅读', 'history')
         }
         ListItem() {
           Scroll() {
             Row() {
               ForEach(this.history.slice(0, 8), (item: ReadProgress) => {
                 this.historyCard(item)
-              }, (item: ReadProgress) => `h_${item.sourceId}_${item.comicId}`)
+              }, (item: ReadProgress) => `h_${item.sourceId}_${item.comicId}_${item.chapterIndex}_${item.page}`)
             }
             .padding({ left: Theme.gapL })
           }
@@ -1297,7 +1335,7 @@ struct Index {
       }
 
       ListItem() {
-        this.sectionTitle('我的书架', this.shelf.length > 0 ? `${this.shelf.length} 本` : '')
+        this.sectionTitle('我的书架', 'shelf')
       }
 
       if (this.shelf.length === 0) {
@@ -1336,7 +1374,7 @@ struct Index {
             .alignItems(VerticalAlign.Top)
             .padding({ left: Theme.gapM, right: Theme.gapM, bottom: 18 })
           }
-        }, (row: ShelfItem[], index: number) => `srow_${index}_${row.length}`)
+        }, (row: ShelfItem[], index: number) => this.shelfRowKey(row, index))
       }
     }
     .width('100%')
@@ -1349,13 +1387,18 @@ struct Index {
   // ─────────────────────────── 我的 ───────────────────────────
 
   @Builder
-  settingRow(title: string, value: string, action: () => void) {
+  /**
+   * 「我的」页的一行。右侧数值按 valueKey **现算**（读 @State），
+   * 否则收藏/书架/历史数量变了这里不会跟着变。
+   */
+  @Builder
+  settingRow(title: string, valueKey: string, action: () => void) {
     Row() {
       Text(title)
         .fontSize(Theme.fsBody)
         .fontColor(Theme.text)
       Blank()
-      Text(value)
+      Text(this.mineValue(valueKey))
         .fontSize(Theme.fsLabel)
         .fontColor(Theme.textDim)
       Text('›')
@@ -1369,6 +1412,23 @@ struct Index {
     .onClick(() => {
       action();
     })
+  }
+
+  /** 「我的」页各行的数值，读 @State 保证随数据变化刷新 */
+  private mineValue(key: string): string {
+    if (key === 'favorites') {
+      return this.favorites.length > 0 ? `${this.favorites.length} 部` : '暂无';
+    }
+    if (key === 'shelf') {
+      return this.shelf.length > 0 ? `${this.shelf.length} 本` : '暂无';
+    }
+    if (key === 'sources') {
+      return `${this.sources.length} 个已启用`;
+    }
+    if (key === 'history') {
+      return `${this.history.length} 条`;
+    }
+    return '';
   }
 
   @Builder
@@ -1404,11 +1464,11 @@ struct Index {
           .padding({ left: Theme.gapL + 4, bottom: Theme.gapS })
 
         Column() {
-          this.settingRow('我的收藏', this.favorites.length > 0 ? `${this.favorites.length} 部` : '暂无', () => {
+          this.settingRow('我的收藏', 'favorites', () => {
             this.openFavorites();
           })
           Divider().color(Theme.line).margin({ left: Theme.gapL, right: Theme.gapL })
-          this.settingRow('书架', this.shelf.length > 0 ? `${this.shelf.length} 本` : '暂无', () => {
+          this.settingRow('书架', 'shelf', () => {
             this.currentTab = 2;
             this.shelf = Library.get().shelf();
             this.favorites = Library.get().favorites();
@@ -1426,7 +1486,7 @@ struct Index {
           .padding({ left: Theme.gapL + 4, top: Theme.gapXl, bottom: Theme.gapS })
 
         Column() {
-          this.settingRow('图源管理', `${this.sources.length} 个已启用`, () => {
+          this.settingRow('图源管理', 'sources', () => {
             this.openSourceManager();
           })
         }
@@ -1445,7 +1505,7 @@ struct Index {
             router.pushUrl({ url: 'pages/SettingsPage' });
           })
           Divider().color(Theme.line).margin({ left: Theme.gapL, right: Theme.gapL })
-          this.settingRow('阅读历史', `${this.history.length} 条`, () => {
+          this.settingRow('阅读历史', 'history', () => {
             this.currentTab = 2;
             this.shelf = Library.get().shelf();
             this.history = Library.get().history();

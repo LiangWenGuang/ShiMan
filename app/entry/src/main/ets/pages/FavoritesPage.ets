@@ -98,6 +98,12 @@ struct FavoritesPage {
     .padding({ left: Theme.gapM, right: Theme.gapL })
   }
 
+  /** 行 key 必须带内容，否则收藏增删后条数相同时不重排 */
+  private favRowKey(row: ShelfItem[], index: number): string {
+    const head = row.length > 0 ? `${row[0].sourceId}_${row[0].comicId}` : 'empty';
+    return `frow_${index}_${row.length}_${head}`;
+  }
+
   @Builder
   card(item: ShelfItem) {
     Column() {
@@ -190,7 +196,7 @@ struct FavoritesPage {
               .alignItems(VerticalAlign.Top)
               .padding({ left: Theme.gapM, right: Theme.gapM, bottom: 18 })
             }
-          }, (row: ShelfItem[], index: number) => `frow_${index}_${row.length}`)
+          }, (row: ShelfItem[], index: number) => this.favRowKey(row, index))
 
           ListItem() {
             Text('长按封面可以取消收藏')

@@ -13,6 +13,17 @@ struct SettingsPage {
     this.shelfCount = Library.get().shelf().length;
   }
 
+  /** 设置项右侧数值，读 @State 保证随数据变化刷新（不能靠 @Builder 传值） */
+  private settingValue(key: string): string {
+    if (key === 'history') {
+      return `${this.historyCount} 条`;
+    }
+    if (key === 'shelf') {
+      return `${this.shelfCount} 本`;
+    }
+    return '';
+  }
+
   @Builder
   navBar() {
     Row() {
@@ -54,13 +65,17 @@ struct SettingsPage {
   }
 
   @Builder
-  row(title: string, value: string, action: () => void) {
+  /**
+   * 设置项一行。右侧数值按 valueKey 现算（读 @State），
+   * 不能把 `${this.historyCount} 条` 直接当参数传 —— @Builder 按值传参不会更新。
+   */
+  row(title: string, valueKey: string, action: () => void) {
     Row() {
       Text(title)
         .fontSize(Theme.fsBody)
         .fontColor(Theme.text)
       Blank()
-      Text(value)
+      Text(this.settingValue(valueKey))
         .fontSize(Theme.fsLabel)
         .fontColor(Theme.textDim)
       Text('›')
@@ -92,11 +107,11 @@ struct SettingsPage {
         Column() {
           this.sectionLabel('数据')
           Column() {
-            this.row('阅读历史', `${this.historyCount} 条`, () => {
+            this.row('阅读历史', 'history', () => {
               promptAction.showToast({ message: '在「书架」页顶部查看' });
             })
             Divider().color(Theme.line).margin({ left: Theme.gapL, right: Theme.gapL })
-            this.row('书架', `${this.shelfCount} 本`, () => {
+            this.row('书架', 'shelf', () => {
               promptAction.showToast({ message: '在「书架」页查看' });
             })
           }
