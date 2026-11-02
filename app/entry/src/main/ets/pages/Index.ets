@@ -640,29 +640,50 @@ struct Index {
     }
   }
 
+  /** 单张卡片。item 由 ForEach 提供，随行 key 变化一起重建，不存在「参数不刷新」问题 */
   @Builder
-  comicGrid(items: ComicBrief[], showSource: boolean = false) {
-    ForEach(this.rows(items), (row: ComicBrief[]) => {
+  comicCell(item: ComicBrief, showSource: boolean) {
+    Column() {
+      ComicCard({
+        title: item.title,
+        cover: item.cover,
+        subtitle: item.latest,
+        referer: this.refererOf(item.sourceId),
+        sourceTag: showSource ? this.sourceNameOf(item.sourceId) : '',
+        starred: this.isFavorite(item.sourceId, item.comicId),
+        onTap: () => {
+          this.openDetail(item);
+        }
+      })
+    }
+    .layoutWeight(1)
+    .padding({ left: Theme.gapXs, right: Theme.gapXs })
+    .gesture(LongPressGesture().onAction(() => {
+      this.toggleFavorite(item);
+    }))
+  }
+
+  /** 行 key 必须带内容，否则换源后条数一样时 ForEach 认为「行没变」 */
+  private rowKey(row: ComicBrief[], index: number): string {
+    const head = row.length > 0 ? `${row[0].sourceId}_${row[0].comicId}` : 'empty';
+    return `row_${index}_${row.length}_${head}`;
+  }
+
+  /**
+   * 首页网格。
+   *
+   * ★ 这里必须直接读 `this.discover`，不能像以前那样写成
+   * `comicGrid(this.discover)` 把数组当 @Builder 参数传进去 ——
+   * ArkUI 的 @Builder 是**按值传参**，参数变了不会触发内部刷新，
+   * 表现就是「换数据源后源名变了、下面还是上一家的漫画」。
+   * 只有 builder 体内直接读状态变量，依赖才会被记录、才会重渲染。
+   */
+  @Builder
+  homeGrid() {
+    ForEach(this.rows(this.discover), (row: ComicBrief[]) => {
       Row() {
         ForEach(row, (item: ComicBrief) => {
-          Column() {
-            ComicCard({
-              title: item.title,
-              cover: item.cover,
-              subtitle: item.latest,
-              referer: this.refererOf(item.sourceId),
-              sourceTag: showSource ? this.sourceNameOf(item.sourceId) : '',
-              starred: this.isFavorite(item.sourceId, item.comicId),
-              onTap: () => {
-                this.openDetail(item);
-              }
-            })
-          }
-          .layoutWeight(1)
-          .padding({ left: Theme.gapXs, right: Theme.gapXs })
-          .gesture(LongPressGesture().onAction(() => {
-            this.toggleFavorite(item);
-          }))
+          this.comicCell(item, !this.homeCurrentOnly)
         }, (item: ComicBrief) => `${item.sourceId}_${item.comicId}`)
         if (row.length < COLUMNS) {
           ForEach([1, 2].slice(0, COLUMNS - row.length), (pad: number) => {
@@ -673,13 +694,27 @@ struct Index {
       .width('100%')
       .alignItems(VerticalAlign.Top)
       .margin({ bottom: 18 })
-    }, (row: ComicBrief[], index: number) => {
-      // key 必须带上该行首条漫画：只写 index+length 的话，
-      // 换分类后如果条数和行长一样（比如都是 24 条 3 列），
-      // ForEach 会认为行没变化，界面就完全不动 —— 这就是「切分类没反应」的原因
-      const head = row.length > 0 ? `${row[0].sourceId}_${row[0].comicId}` : 'empty';
-      return `row_${index}_${row.length}_${head}`;
-    })
+    }, (row: ComicBrief[], index: number) => this.rowKey(row, index))
+  }
+
+  /** 搜索结果网格，同样直接读 this.searchResults */
+  @Builder
+  searchGrid() {
+    ForEach(this.rows(this.searchResults), (row: ComicBrief[]) => {
+      Row() {
+        ForEach(row, (item: ComicBrief) => {
+          this.comicCell(item, true)
+        }, (item: ComicBrief) => `${item.sourceId}_${item.comicId}`)
+        if (row.length < COLUMNS) {
+          ForEach([1, 2].slice(0, COLUMNS - row.length), (pad: number) => {
+            Column().layoutWeight(1)
+          }, (pad: number) => `pad_${pad}`)
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+      .margin({ bottom: 18 })
+    }, (row: ComicBrief[], index: number) => this.rowKey(row, index))
   }
 
   /** 图源显示名；找不到就用 sourceId 兜底，避免空标签 */
@@ -711,7 +746,7 @@ struct Index {
             ListItem() {
               Column() {
                 // 只看当前图源时不重复标注来源；聚合模式才加来源标签
-                this.comicGrid(this.discover, !this.homeCurrentOnly)
+                this.homeGrid()
               }
               .padding({ left: Theme.gapM, right: Theme.gapM, top: Theme.gapS })
             }
@@ -1107,7 +1142,7 @@ struct Index {
           }
           ListItem() {
             Column() {
-              this.comicGrid(this.searchResults, true)
+              this.searchGrid()
             }
             .padding({ left: Theme.gapM, right: Theme.gapM })
           }
