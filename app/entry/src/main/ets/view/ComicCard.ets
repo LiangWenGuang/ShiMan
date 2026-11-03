@@ -79,7 +79,6 @@ export struct ComicCard {
 
       Text(this.title)
         .fontSize(Theme.fsLabel + 1)
-        .lineHeight(20)
         .fontWeight(FontWeight.Medium)
         .fontColor(Theme.text)
         .maxLines(2)
@@ -87,8 +86,8 @@ export struct ComicCard {
         // 标签存在时与标签保持统一节奏；无标签时仍保留一段呼吸空间。
         .margin({ top: Theme.gapS })
         .width('100%')
-        // 固定两行高度：标题一行的卡片不会把整排压得高低不齐
-        .height(40)
+        // 保留两行最小空间，系统大字体可自然增高，避免固定高度裁切。
+        .constraintSize({ minHeight: 40 })
     }
     .width('100%')
     .onClick(() => {

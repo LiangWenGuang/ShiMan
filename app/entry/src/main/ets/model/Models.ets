@@ -79,6 +79,8 @@ export class ReadProgress {
   chapterIndex: number = 0;
   chapterTitle: string = '';
   page: number = 0;
+  /** 当前页相对列表顶部的滚动偏移（vp），旧记录没有此列时按 0 处理。 */
+  pageOffset: number = 0;
   updatedAt: number = 0;
 }
 

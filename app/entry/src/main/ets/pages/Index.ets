@@ -11,7 +11,7 @@ import { Theme } from '../theme/Theme';
 import { appVersionLabel } from '../util/AppInfo';
 
 /** 网格每行卡片数 */
-const COLUMNS: number = 3;
+
 
 /** 首页聚合时每批并发的源数量：太多会被站点限流，太少又慢 */
 const DISCOVER_BATCH: number = 4;
@@ -45,10 +45,21 @@ function interleave(buckets: ComicBrief[][]): ComicBrief[] {
   return out;
 }
 
+/** 图源搜索状态与结果独立展示，避免跨源混排。 */
+@Observed
+class SearchGroup {
+  sourceId: string = '';
+  name: string = '';
+  items: ComicBrief[] = [];
+  status: string = '等待搜索';
+}
+
 @Entry
 @Component
 struct Index {
   @State currentTab: number = 0;
+  // 以可用宽度决定网格列数，兼容窄屏和横屏。
+  @State gridColumns: number = 3;
 
   // 发现（首页）
   @State sources: SourceRule[] = [];
@@ -74,6 +85,12 @@ struct Index {
   // 搜索
   @State keyword: string = '';
   @State searchAll: boolean = false;
+  @State searchGroups: SearchGroup[] = [];
+  @State searchCompleted: number = 0;
+  @State shelfFilter: string = '';
+  @State shelfSort: number = 0;
+  @State shelfEditing: boolean = false;
+  @State shelfSelected: string[] = [];
   @State searchResults: ComicBrief[] = [];
   @State searchLoading: boolean = false;
   @State searchError: string = '';
@@ -295,62 +312,67 @@ struct Index {
       promptAction.showToast({ message: '先输入关键词' });
       return;
     }
-    // 记录搜索历史
-    const token = ++this.searchToken;
+    this.resetSearch();
+    const token = this.searchToken;
     Library.get().addSearchHistory(kw);
     this.searchHistoryShown = false;
-    this.searchLoading = true;
-    this.searchError = '';
-    this.searchDone = false;
     const registry = SourceRegistry.get();
-    const merged: ComicBrief[] = [];
-    const errors: string[] = [];
-
-    if (this.searchAll) {
-      const list = registry.enabled();
-      for (let i = 0; i < list.length; i++) {
-        const outcome = await SourceApi.search(list[i], kw, 1);
-        if (token !== this.searchToken) {
-          return;
-        }
-        if (outcome.ok && outcome.value !== undefined) {
-          for (let k = 0; k < outcome.value.length; k++) {
-            merged.push(outcome.value[k]);
-          }
-        } else {
-          errors.push(outcome.message);
-        }
-      }
-    } else {
-      const rule = registry.find(registry.currentSourceId());
-      if (rule === null) {
-        this.searchLoading = false;
-        this.searchDone = true;
-        this.searchResults = [];
-        this.searchError = '还没有启用任何图源';
-        return;
-      }
-      const outcome = await SourceApi.search(rule, kw, 1);
-      if (token !== this.searchToken) {
-        return;
-      }
-      if (outcome.ok && outcome.value !== undefined) {
-        for (let k = 0; k < outcome.value.length; k++) {
-          merged.push(outcome.value[k]);
-        }
-      } else {
-        errors.push(outcome.message);
-      }
+    const current = registry.find(registry.currentSourceId());
+    const list: SourceRule[] = this.searchAll ? registry.enabled() : (current === null ? [] : [current]);
+    this.searchGroups = list.map((rule: SourceRule): SearchGroup => {
+      const group = new SearchGroup();
+      group.sourceId = rule.id;
+      group.name = rule.name;
+      return group;
+    });
+    if (list.length === 0) {
+      this.searchDone = true;
+      this.searchError = '还没有启用任何图源';
+      return;
     }
-
+    this.searchLoading = true;
+    // 三个工作协程共享游标，先完成的源立即展示；取消后不再领取后续源。
+    let next: number = 0;
+    const worker = async (): Promise<void> => {
+      while (token === this.searchToken && next < list.length) {
+        const index = next++;
+        this.searchGroups[index].status = '正在搜索…';
+        this.searchGroups = this.searchGroups.slice();
+        try {
+          const result = await SourceApi.search(list[index], kw, 1);
+          if (token !== this.searchToken) return;
+          const group = this.searchGroups[index];
+          group.items = result.ok && result.value !== undefined ? result.value : [];
+          group.status = group.items.length > 0 ? group.items.length + ' 部' : result.message || '暂无匹配结果';
+        } catch (error) {
+          if (token !== this.searchToken) return;
+          this.searchGroups[index].status = '请求失败，可重新搜索';
+        }
+        this.searchCompleted++;
+        this.searchGroups = this.searchGroups.slice();
+        this.searchResults = [];
+        this.searchGroups.forEach((group: SearchGroup) => {
+          this.searchResults = this.searchResults.concat(group.items);
+        });
+      }
+    };
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(3, list.length); i++) workers.push(worker());
+    await Promise.all(workers);
+    if (token !== this.searchToken) return;
     this.searchLoading = false;
     this.searchDone = true;
-    this.searchResults = merged;
-    if (merged.length === 0) {
-      this.searchError = errors.length > 0 ? errors.join('\n') : '没有找到结果，换个关键词试试';
-    } else if (errors.length > 0) {
-      this.searchError = `部分图源失败：${errors.join('；')}`;
-    }
+  }
+
+  private cancelSearch(): void {
+    // 已发出的网络请求由超时回收，令牌使其结果失效并阻止排队图源继续请求。
+    this.searchToken++;
+    this.searchLoading = false;
+    this.searchDone = true;
+    this.searchGroups.forEach((group: SearchGroup) => {
+      if (group.status === '等待搜索' || group.status === '正在搜索…') group.status = '已取消';
+    });
+    this.searchGroups = this.searchGroups.slice();
   }
 
   private resetSearch(): void {
@@ -359,6 +381,8 @@ struct Index {
     this.searchLoading = false;
     this.searchDone = false;
     this.searchResults = [];
+    this.searchGroups = [];
+    this.searchCompleted = 0;
     this.searchError = '';
   }
 
@@ -421,7 +445,7 @@ struct Index {
     let current: ComicBrief[] = [];
     for (let i = 0; i < items.length; i++) {
       current.push(items[i]);
-      if (current.length === COLUMNS) {
+      if (current.length === this.gridColumns) {
         out.push(current);
         current = [];
       }
@@ -432,12 +456,21 @@ struct Index {
     return out;
   }
 
+  private paddingSlots(count: number): number[] {
+    const slots: number[] = [];
+    for (let i = 0; i < count; i++) slots.push(i);
+    return slots;
+  }
+
   private shelfRows(): ShelfItem[][] {
     const out: ShelfItem[][] = [];
     let current: ShelfItem[] = [];
-    for (let i = 0; i < this.shelf.length; i++) {
-      current.push(this.shelf[i]);
-      if (current.length === COLUMNS) {
+    // 按名称筛选并排序副本，不改原始持久化顺序。
+    const filtered = this.shelf.filter((item: ShelfItem) => item.title.toLowerCase().indexOf(this.shelfFilter.trim().toLowerCase()) >= 0);
+    filtered.sort((left: ShelfItem, right: ShelfItem): number => this.shelfSort === 0 ? right.updatedAt - left.updatedAt : left.title.localeCompare(right.title));
+    for (let i = 0; i < filtered.length; i++) {
+      current.push(filtered[i]);
+      if (current.length === this.gridColumns) {
         out.push(current);
         current = [];
       }
@@ -753,8 +786,8 @@ struct Index {
         ForEach(row, (item: ComicBrief) => {
           this.comicCell(item, !this.homeCurrentOnly)
         }, (item: ComicBrief) => `${item.sourceId}_${item.comicId}`)
-        if (row.length < COLUMNS) {
-          ForEach([1, 2].slice(0, COLUMNS - row.length), (pad: number) => {
+        if (row.length < this.gridColumns) {
+          ForEach(this.paddingSlots(this.gridColumns - row.length), (pad: number) => {
             Column().layoutWeight(1)
           }, (pad: number) => `pad_${pad}`)
         }
@@ -773,8 +806,8 @@ struct Index {
         ForEach(row, (item: ComicBrief) => {
           this.comicCell(item, true)
         }, (item: ComicBrief) => `${item.sourceId}_${item.comicId}`)
-        if (row.length < COLUMNS) {
-          ForEach([1, 2].slice(0, COLUMNS - row.length), (pad: number) => {
+        if (row.length < this.gridColumns) {
+          ForEach(this.paddingSlots(this.gridColumns - row.length), (pad: number) => {
             Column().layoutWeight(1)
           }, (pad: number) => `pad_${pad}`)
         }
@@ -1179,50 +1212,46 @@ struct Index {
 
       if (this.searchHistoryShown && this.searchHistoryItems.length > 0) {
         this.searchHistoryPanel()
-      } else if (this.searchLoading) {
-        this.loadingBlock('正在各源检索…')
-      } else if (this.searchResults.length === 0) {
-        if (this.searchDone && this.searchError.length > 0) {
-          this.emptyBlock('', '', '清空重来', () => {
-            this.keyword = '';
-            this.searchDone = false;
-            this.searchResults = [];
-            this.searchError = '';
-          }, 'searchError')
-        } else {
-          this.emptyBlock('还没有搜索', '输入关键词，可在全部图源中一次找完', '', () => {
-          }, '')
-        }
-      } else {
-        List() {
-          ListItem() {
-            Row() {
-              Text(`找到 ${this.searchResults.length} 部`)
-                .fontSize(Theme.fsCaption)
-                .fontColor(Theme.textSub)
-              Blank()
-              if (this.searchError.length > 0) {
-                Text(this.searchError)
-                  .fontSize(Theme.fsCaption)
-                  .fontColor(Theme.warn)
-                  .maxLines(1)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .layoutWeight(1)
-                  .textAlign(TextAlign.End)
+      } else if (this.searchGroups.length > 0) {
+        Column() {
+          Row() {
+            Text('已完成 ' + this.searchCompleted + '/' + this.searchGroups.length + ' 个图源 · ' + this.searchResults.length + ' 部')
+              .fontSize(Theme.fsCaption).fontColor(Theme.textSub).layoutWeight(1)
+            if (this.searchLoading) {
+              Button('取消').fontSize(Theme.fsLabel).onClick(() => { this.cancelSearch(); })
+            }
+          }.width('100%').padding(Theme.gapL)
+          List({ space: Theme.gapL }) {
+            ForEach(this.searchGroups, (group: SearchGroup) => {
+              ListItem() {
+                Column({ space: Theme.gapM }) {
+                  Row() {
+                    Text(group.name).fontSize(Theme.fsHeadline).fontWeight(FontWeight.Medium).fontColor(Theme.text)
+                    Blank()
+                    Text(group.status).fontSize(Theme.fsCaption).fontColor(Theme.textSub)
+                      .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: '55%' })
+                  }.width('100%').padding({ left: Theme.gapL, right: Theme.gapL })
+                  if (group.items.length > 0) {
+                    List({ space: Theme.gapM }) {
+                      ForEach(group.items, (item: ComicBrief) => {
+                        ListItem() {
+                          ComicCard({ title: item.title, cover: item.cover, subtitle: item.latest,
+                            referer: this.refererOf(item.sourceId), starred: this.isFavorite(item.sourceId, item.comicId),
+                            onTap: () => { this.openDetail(item); } })
+                        }.width(112)
+                      }, (item: ComicBrief) => item.sourceId + '|' + item.comicId)
+                    }.listDirection(Axis.Horizontal).height(250).width('100%').scrollBar(BarState.Off)
+                      .padding({ left: Theme.gapL, right: Theme.gapL })
+                  }
+                }.width('100%').padding({ top: Theme.gapM, bottom: Theme.gapM })
+                  .backgroundColor(Theme.surface).borderRadius(Theme.radiusM)
               }
-            }
-            .width('100%')
-            .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapL, bottom: Theme.gapM })
-          }
-          ListItem() {
-            Column() {
-              this.searchGrid()
-            }
-            .padding({ left: Theme.gapM, right: Theme.gapM })
-          }
-        }
-        .layoutWeight(1)
-        .scrollBar(BarState.Off)
+            }, (group: SearchGroup) => group.sourceId + '|' + group.status + '|' + group.items.length)
+          }.layoutWeight(1).width('100%').scrollBar(BarState.Off)
+        }.layoutWeight(1).width('100%')
+      } else {
+        this.emptyBlock(this.searchDone ? '没有可用结果' : '搜索漫画',
+          this.searchError.length > 0 ? this.searchError : '输入关键词，按图源分别浏览搜索结果', '', () => {}, '')
       }
     }
     .width('100%')
@@ -1285,6 +1314,7 @@ struct Index {
       params.chapterIndex = item.chapterIndex;
       params.chapterId = item.chapterId;
       params.page = item.page;
+      params.pageOffset = item.pageOffset;
       router.pushUrl({ url: 'pages/ReaderPage', params: params });
     })
     .gesture(LongPressGesture().onAction(() => {
@@ -1311,9 +1341,27 @@ struct Index {
     });
   }
 
+  private async removeSelectedShelf(): Promise<void> {
+    // 删除以用户确认的快照为准，不影响收藏和阅读记录。
+    const keys = this.shelfSelected.slice();
+    try {
+      const result = await promptAction.showDialog({ title: '移出书架', message: '移除所选 ' + keys.length + ' 部作品？收藏与阅读记录会保留。',
+        buttons: [{ text: '取消', color: Theme.textSub }, { text: '移除', color: Theme.warn }] });
+      if (result.index !== 1) return;
+      await Library.get().removeShelfBatch(keys);
+      this.shelf = Library.get().shelf(); this.shelfSelected = [];
+    } catch (error) {
+      // 对话框取消时不改变书架。
+    }
+  }
+
   @Builder
   shelfCard(item: ShelfItem) {
     Column() {
+      if (this.shelfEditing) {
+        Text(this.shelfSelected.indexOf(item.sourceId + '|' + item.comicId) >= 0 ? '已选择 ✓' : '点击选择')
+          .fontSize(Theme.fsCaption).fontColor(Theme.accent)
+      }
       RemoteImage({
         url: item.cover,
         referer: this.refererOf(item.sourceId),
@@ -1339,6 +1387,11 @@ struct Index {
     .layoutWeight(1)
     .padding({ left: Theme.gapXs, right: Theme.gapXs })
     .onClick(() => {
+      if (this.shelfEditing) {
+        const key = item.sourceId + '|' + item.comicId;
+        this.shelfSelected = this.shelfSelected.indexOf(key) >= 0 ? this.shelfSelected.filter((value: string) => value !== key) : this.shelfSelected.concat([key]);
+        return;
+      }
       const params: DetailParams = new DetailParams();
       params.sourceId = item.sourceId;
       params.comicId = item.comicId;
@@ -1351,6 +1404,24 @@ struct Index {
   @Builder
   shelfTab() {
     List() {
+      ListItem() {
+        Column({ space: Theme.gapS }) {
+          TextInput({ placeholder: '筛选书架作品', text: this.shelfFilter })
+            .fontColor(Theme.text).backgroundColor(Theme.surface).onChange((value: string) => { this.shelfFilter = value; })
+          Row({ space: Theme.gapS }) {
+            Button(this.shelfSort === 0 ? '最近加入' : '名称排序').fontSize(Theme.fsLabel)
+              .onClick(() => { this.shelfSort = this.shelfSort === 0 ? 1 : 0; })
+            Blank()
+            if (this.shelfEditing) {
+              Button('移除 ' + this.shelfSelected.length).fontSize(Theme.fsLabel)
+                .enabled(this.shelfSelected.length > 0).onClick(() => { this.removeSelectedShelf(); })
+            }
+            Button(this.shelfEditing ? '完成' : '整理').fontSize(Theme.fsLabel).onClick(() => {
+              this.shelfEditing = !this.shelfEditing; this.shelfSelected = [];
+            })
+          }.width('100%')
+        }.padding(Theme.gapL)
+      }
       if (this.history.length > 0) {
         ListItem() {
           this.sectionTitle('继续阅读', 'history')
@@ -1400,8 +1471,8 @@ struct Index {
               ForEach(row, (item: ShelfItem) => {
                 this.shelfCard(item)
               }, (item: ShelfItem) => `s_${item.sourceId}_${item.comicId}`)
-              if (row.length < COLUMNS) {
-                ForEach([1, 2].slice(0, COLUMNS - row.length), (pad: number) => {
+              if (row.length < this.gridColumns) {
+                ForEach(this.paddingSlots(this.gridColumns - row.length), (pad: number) => {
                   Column().layoutWeight(1)
                 }, (pad: number) => `spad_${pad}`)
               }
@@ -1636,6 +1707,10 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+    .onAreaChange((oldArea: Area, area: Area) => {
+      const width = Number(area.width);
+      this.gridColumns = Math.max(2, Math.min(6, Math.floor(width / 112)));
+    })
   }
 
   @Builder

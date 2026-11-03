@@ -191,6 +191,8 @@ export class Library {
       item.updatedAt = isNaN(stamp) ? 0 : stamp;
       // 第 10 列是后加的详情页地址；老记录没有这一列，留空由调用方兜底
       item.url = parts.length > 9 ? dec(parts[9]) : '';
+      const offset = parts.length > 10 ? parseFloat(parts[10]) : 0;
+      item.pageOffset = isNaN(offset) || offset < 0 ? 0 : offset;
       out.push(item);
     }
     return out;
@@ -230,6 +232,34 @@ export class Library {
       if (!(item.sourceId === sourceId && item.comicId === comicId)) {
         kept.push(item);
       }
+    }
+    this.shelfItems = kept;
+    await this.persistShelf();
+  }
+
+  /** 批量移除书架条目，统一一次持久化，避免逐条写入造成 UI 卡顿。 */
+  async removeShelfBatch(keys: string[]): Promise<void> {
+    if (keys.length === 0 || this.shelfItems.length === 0) {
+      return;
+    }
+    const removeSet = new Set<string>();
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i].length > 0) {
+        removeSet.add(keys[i]);
+      }
+    }
+    if (removeSet.size === 0) {
+      return;
+    }
+    const kept: ShelfItem[] = [];
+    for (let i = 0; i < this.shelfItems.length; i++) {
+      const item = this.shelfItems[i];
+      if (!removeSet.has(this.keyOf(item.sourceId, item.comicId))) {
+        kept.push(item);
+      }
+    }
+    if (kept.length === this.shelfItems.length) {
+      return;
     }
     this.shelfItems = kept;
     await this.persistShelf();
@@ -374,7 +404,8 @@ export class Library {
       lines.push([
         enc(item.sourceId), enc(item.comicId), enc(item.title), enc(item.cover),
         enc(item.chapterId), String(item.chapterIndex), enc(item.chapterTitle),
-        String(item.page), String(item.updatedAt), enc(item.url)
+        String(item.page), String(item.updatedAt), enc(item.url),
+        String(Math.max(0, item.pageOffset))
       ].join('\t'));
     }
     this.store.put(KEY_PROGRESS, lines.join('\n')).then(() => {

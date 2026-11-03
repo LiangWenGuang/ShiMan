@@ -15,6 +15,21 @@ export default class EntryAbility extends UIAbility {
 
   async onWindowStageCreate(windowStage: window.WindowStage): Promise<void> {
     Trace.init(this.context.filesDir);
+    // 应用采用深色主题，统一设置系统状态栏与导航栏，避免启动页出现白色条带。
+    try {
+      const mainWindow = await windowStage.getMainWindow();
+      await mainWindow.setWindowSystemBarProperties({
+        statusBarColor: '#0D1117',
+        navigationBarColor: '#0D1117',
+        isStatusBarLightIcon: true,
+        isNavigationBarLightIcon: true,
+        statusBarContentColor: '#F4F7FB',
+        navigationBarContentColor: '#F4F7FB'
+      });
+    } catch (error) {
+      // 部分设备/模拟器不支持运行时设置时，保持系统默认，不阻塞页面启动。
+      Trace.write('window', 'system bar style unavailable: ' + String(error));
+    }
     // 图源与本地库在首帧之前准备好，避免页面拿到空列表
     try {
       await SourceRegistry.get().init(this.context);

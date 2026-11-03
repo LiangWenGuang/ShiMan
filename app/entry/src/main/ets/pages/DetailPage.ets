@@ -170,6 +170,12 @@ struct DetailPage {
     params.comicId = this.params.comicId;
     params.comicUrl = this.detail.url;
     params.chapterIndex = index;
+    // 显式点选章节时携带章节 ID，阅读器不会被旧的续读记录重定向到另一章。
+    const chapter = this.detail.chapters[index];
+    params.chapterId = chapter === undefined ? '' : chapter.chapterId;
+    const saved = Library.get().progress(this.params.sourceId, this.params.comicId);
+    params.page = saved !== null && saved.chapterIndex === index ? saved.page : 0;
+    params.pageOffset = saved !== null && saved.chapterIndex === index ? saved.pageOffset : 0;
     router.pushUrl({ url: 'pages/ReaderPage', params: params });
   }
 

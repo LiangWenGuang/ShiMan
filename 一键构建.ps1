@@ -5,7 +5,9 @@
 #    powershell -ExecutionPolicy Bypass -File 一键构建.ps1
 #        编译并产出 unsigned HAP（不需要连手机、不需要账号）。
 #    powershell -ExecutionPolicy Bypass -File 一键构建.ps1 -EngineTest
-#        额外跑一遍引擎回归（真实网络，验证图源可用性）。
+#        运行基于当前 app 源码镜像的离线引擎回归。
+#    powershell -ExecutionPolicy Bypass -File 一键构建.ps1 -LiveEngineTest
+#        在已有 tools/http.mjs 时额外跑真实网络图源回归。
 #
 #  说明:
 #    本工程使用了新的 bundleName（com.manyu.reader），而调试签名证书是与
@@ -14,7 +16,8 @@
 # =============================================================================
 param(
   [string]$DevEcoPath = 'D:\DevEco Studio',
-  [switch]$EngineTest
+  [switch]$EngineTest,
+  [switch]$LiveEngineTest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -92,13 +95,28 @@ if ($EngineTest) {
   Push-Location $testDir
   & $node --experimental-transform-types run.ts
   $r1 = $LASTEXITCODE
-  & $node --experimental-transform-types live.ts
-  $r2 = $LASTEXITCODE
   Pop-Location
-  if ($r1 -ne 0 -or $r2 -ne 0) { Fail '引擎回归未全绿，先修规则再装机' }
-  Ok '引擎回归全绿'
+  if ($r1 -ne 0) { Fail '离线引擎回归失败，先修解析规则再装机' }
+  Ok '当前 app 源码离线回归全绿'
 } else {
   Write-Host '    跳过（需要时加 -EngineTest）' -ForegroundColor DarkGray
+}
+
+if ($LiveEngineTest) {
+  $testDir = Join-Path $here 'tools\engine-test'
+  $node = Join-Path $DevEcoPath 'tools\node\node.exe'
+  if (!(Test-Path -LiteralPath $node)) { $node = 'node' }
+  $httpHelper = Join-Path $here 'tools\http.mjs'
+  if (!(Test-Path -LiteralPath $httpHelper)) {
+    Write-Host '    跳过真实网络回归：缺少 tools/http.mjs（可显式补齐后重试）' -ForegroundColor Yellow
+  } else {
+    Push-Location $testDir
+    & $node --experimental-transform-types live.ts
+    $liveCode = $LASTEXITCODE
+    Pop-Location
+    if ($liveCode -ne 0) { Fail '真实网络图源回归失败' }
+    Ok '真实网络图源回归全绿'
+  }
 }
 
 Write-Host ''

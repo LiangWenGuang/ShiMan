@@ -17,6 +17,8 @@ export class ReaderParams {
   chapterId: string = '';
   /** 从书架/历史继续阅读时，恢复到这一页（0 起） */
   page: number = 0;
+  /** 继续阅读时恢复到当前页内的偏移（vp）。 */
+  pageOffset: number = 0;
 }
 
 export class SwitchParams {

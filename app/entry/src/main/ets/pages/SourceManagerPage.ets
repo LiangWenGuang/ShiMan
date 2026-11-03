@@ -3,6 +3,7 @@ import { SourceRegistry } from '../source/SourceRegistry';
 import { SourceApi } from '../source/SourceApi';
 import { SourceRule } from '../rule/Rules';
 import { Theme } from '../theme/Theme';
+import { SourceHealth, SourceHealthState } from '../source/SourceHealth';
 
 class SourceState {
   rule: SourceRule;
@@ -23,6 +24,11 @@ struct SourceManagerPage {
   @State currentId: string = '';
 
   aboutToAppear(): void {
+    this.reload();
+  }
+
+  onPageShow(): void {
+    // 从详情或搜索返回时刷新健康状态文案，但不主动发起新的网络请求。
     this.reload();
   }
 
@@ -73,6 +79,30 @@ struct SourceManagerPage {
       item.result = `不可用 · ${outcome.message}`;
     }
     this.items = this.items.slice();
+  }
+
+  private checkLabel(item: SourceState): string {
+    if (item.checking) return '请求中…';
+    const state: SourceHealthState | null = SourceHealth.get(item.rule.id);
+    return state !== null && !state.ok ? '重试请求' : '连通性自检';
+  }
+
+  private healthText(id: string): string {
+    const state: SourceHealthState | null = SourceHealth.get(id);
+    if (state === null) return '尚未访问';
+    const date = new Date(state.at);
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const time = `${hh}:${mm}`;
+    const success = state.lastSuccessAt > 0 ? new Date(state.lastSuccessAt) : null;
+    const successText = success === null ? '暂无成功记录' :
+      `最后成功 ${String(success.getHours()).padStart(2, '0')}:${String(success.getMinutes()).padStart(2, '0')}`;
+    return `${state.ok ? '最近成功' : '最近失败'} · ${time} · ${state.message} · ${successText}`;
+  }
+
+  private healthColor(id: string): string {
+    const state: SourceHealthState | null = SourceHealth.get(id);
+    return state !== null && !state.ok ? Theme.warn : Theme.textDim;
   }
 
   @Builder
@@ -163,7 +193,7 @@ struct SourceManagerPage {
       .width('100%')
 
       Row() {
-        this.smallButton(item.checking ? '检测中…' : '连通性自检', true, () => {
+        this.smallButton(this.checkLabel(item), true, () => {
           this.selfCheck(item);
         })
         Text('设为当前源')
@@ -194,6 +224,13 @@ struct SourceManagerPage {
           .width('100%')
           .margin({ top: Theme.gapS })
       }
+      Text(this.healthText(item.rule.id))
+        .fontSize(Theme.fsMicro)
+        .fontColor(this.healthColor(item.rule.id))
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .margin({ top: Theme.gapS })
     }
     .width('100%')
     .padding(Theme.gapL)

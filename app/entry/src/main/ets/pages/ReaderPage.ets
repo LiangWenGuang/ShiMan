@@ -40,6 +40,7 @@ struct ReaderPage {
   @State chapterDescending: boolean = false;
   @State loadingText: string = '正在取图…';
   @State currentPage: number = 0;
+  @State pageOffset: number = 0;
 
   // web 型图源的取图状态
   @State harvesting: boolean = false;
@@ -62,6 +63,17 @@ struct ReaderPage {
   private catalogScroller: Scroller = new Scroller();
   /** 继续阅读要恢复到的页（0 起，-1 表示不恢复） */
   private targetPage: number = -1;
+  // 仅对已拿到真实图片比例的目标项恢复页内位置。
+  private readyPages: Set<number> = new Set<number>();
+  private targetPageOffset: number = 0;
+  private restoringPage: boolean = false;
+  private restoreTimer: number = -1;
+  /** 章节请求令牌：切章时让旧请求无法覆盖新章节。 */
+  private chapterToken: number = 0;
+  /** 页面重新进入或换源时，使上一轮详情请求失效。 */
+  private bootstrapToken: number = 0;
+  /** 合并快速滚动产生的进度写入，降低 Preferences 持久化频率。 */
+  private progressTimer: number = -1;
 
   aboutToAppear(): void {
     // router.getParams() 返回的是普通对象，ArkTS 下直接 `as ReaderParams` 强转后
@@ -78,6 +90,8 @@ struct ReaderPage {
       safe.chapterId = this.asString(p['chapterId']);
       const pg = p['page'];
       safe.page = typeof pg === 'number' ? pg : (parseInt(this.asString(pg), 10) || 0);
+      const po = p['pageOffset'];
+      safe.pageOffset = typeof po === 'number' && po > 0 ? po : 0;
       this.params = safe;
     }
     Trace.write('reader', 'enter source=' + this.params.sourceId +
@@ -111,7 +125,25 @@ struct ReaderPage {
     this.bootstrap();
   }
 
+  onPageHide(): void {
+    // 离开阅读器时立即落盘最后页，避免延迟写入被页面销毁取消。
+    if (this.progressTimer >= 0) {
+      clearTimeout(this.progressTimer);
+      this.progressTimer = -1;
+    }
+    // 取图未完成时不写入空页，避免覆盖已有的有效阅读进度。
+    if (!this.loading && !this.harvesting && this.images.length > 0) {
+      this.saveProgressNow();
+    }
+    if (this.restoreTimer >= 0) {
+      clearTimeout(this.restoreTimer);
+      this.restoreTimer = -1;
+    }
+    this.restoringPage = false;
+  }
+
   private async bootstrap(): Promise<void> {
+    const bootstrapToken = ++this.bootstrapToken;
     const registry = SourceRegistry.get();
     let rule: SourceRule | null = registry.find(this.params.sourceId);
     if (rule === null) {
@@ -137,9 +169,15 @@ struct ReaderPage {
       this.params.comicUrl = comicUrl;
     }
     let detailOutcome = await SourceApi.detail(rule, this.params.comicId, comicUrl);
+    if (bootstrapToken !== this.bootstrapToken) {
+      return;
+    }
     if (!detailOutcome.ok && comicUrl.length > 0) {
       // 记下的地址可能已经过期（站点改版），再按源内约定重试一次
       detailOutcome = await SourceApi.detail(rule, this.params.comicId, '');
+      if (bootstrapToken !== this.bootstrapToken) {
+        return;
+      }
     }
     if (!detailOutcome.ok) {
       // 最后的自救：按书名回源站搜一次，命中同名就把地址纠正过来。
@@ -148,6 +186,9 @@ struct ReaderPage {
       if (healed.length > 0) {
         this.params.comicUrl = healed;
         detailOutcome = await SourceApi.detail(rule, this.params.comicId, healed);
+        if (bootstrapToken !== this.bootstrapToken) {
+          return;
+        }
       }
     }
     if (!detailOutcome.ok || detailOutcome.value === undefined) {
@@ -159,19 +200,37 @@ struct ReaderPage {
     // 详情地址可能有更新，写回参数，换源与重试都用得上
     this.params.comicUrl = this.detail.url;
     let start = this.params.chapterIndex;
+    // 章节列表可能因图源更新而重排：优先按章节 ID，再按保存的标题，最后才用旧序号。
+    const saved = Library.get().progress(this.params.sourceId, this.params.comicId);
+    let chapterMatched = false;
     if (this.params.chapterId.length > 0) {
       for (let i = 0; i < this.detail.chapters.length; i++) {
         if (this.detail.chapters[i].chapterId === this.params.chapterId) {
           start = i;
+          chapterMatched = true;
           break;
         }
+      }
+    }
+    if (!chapterMatched && this.params.chapterId.length > 0 && saved !== null && saved.chapterTitle.length > 0) {
+      let matched = false;
+      for (let i = 0; i < this.detail.chapters.length; i++) {
+        if (this.detail.chapters[i].title === saved.chapterTitle) {
+          start = i;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        start = saved.chapterIndex;
       }
     }
     const total = this.detail.chapters.length;
     if (start < 0 || start >= total) {
       start = 0;
     }
-    this.targetPage = this.params.page > 0 ? this.params.page : -1;
+    this.targetPageOffset = this.params.pageOffset > 0 ? this.params.pageOffset : 0;
+    this.targetPage = this.params.page > 0 || this.targetPageOffset > 0 ? this.params.page : -1;
     await this.loadChapter(start);
     this.scrollToTargetPage();
   }
@@ -245,11 +304,14 @@ struct ReaderPage {
       this.error = '图源已失效';
       return;
     }
+    const token = ++this.chapterToken;
+    this.readyPages.clear();
     this.loading = true;
     this.error = '';
     this.images = [];
     this.chapterIndex = index;
     this.currentPage = 0;
+    this.pageOffset = 0;
     this.loadingText = '正在取图…';
     this.harvestToken++;
     this.harvestDone = false;
@@ -259,6 +321,9 @@ struct ReaderPage {
 
     const chapter: ChapterBrief = chapters[index];
     const outcome = await SourceApi.images(rule, this.params.comicId, chapter);
+    if (token !== this.chapterToken) {
+      return;
+    }
     if (!outcome.ok || outcome.value === undefined) {
       this.loading = false;
       this.error = outcome.message;
@@ -384,6 +449,23 @@ struct ReaderPage {
     if (chapter === undefined) {
       return;
     }
+    if (this.progressTimer >= 0) {
+      clearTimeout(this.progressTimer);
+    }
+    this.progressTimer = setTimeout(() => {
+      this.progressTimer = -1;
+      this.saveProgressNow();
+    }, 300);
+  }
+
+  private saveProgressNow(): void {
+    if (this.detail === null || this.loading || this.harvesting || this.images.length === 0 || this.restoringPage || this.targetPage >= 0) {
+      return;
+    }
+    const chapter = this.detail.chapters[this.chapterIndex];
+    if (chapter === undefined) {
+      return;
+    }
     const progress = new ReadProgress();
     progress.sourceId = this.detail.sourceId;
     progress.comicId = this.detail.comicId;
@@ -394,6 +476,7 @@ struct ReaderPage {
     progress.chapterIndex = this.chapterIndex;
     progress.chapterTitle = chapter.title;
     progress.page = this.currentPage;
+    progress.pageOffset = this.pageOffset;
     Library.get().saveProgress(progress);
   }
 
@@ -403,10 +486,50 @@ struct ReaderPage {
       return;
     }
     const page = this.targetPage < this.images.length ? this.targetPage : this.images.length - 1;
-    this.targetPage = -1;
+    this.targetPage = page;
+    let sizesReady = true;
+    for (let index = Math.max(0, page - 2); index <= page; index++) {
+      if (!this.readyPages.has(index)) sizesReady = false;
+    }
+    if (!sizesReady) {
+      this.currentPage = page;
+      this.restoringPage = true;
+      const token = this.chapterToken;
+      this.restoreTimer = setTimeout(() => {
+        if (token === this.chapterToken) this.scroller.scrollToIndex(page, false, ScrollAlign.START);
+        this.restoreTimer = -1;
+      }, 100);
+      return;
+    }
+    const offset = this.targetPageOffset;
     this.currentPage = page;
-    setTimeout(() => {
-      this.scroller.scrollToIndex(page);
+    this.pageOffset = offset;
+    this.restoringPage = true;
+    const token = this.chapterToken;
+    this.restoreTimer = setTimeout(() => {
+      if (token !== this.chapterToken) {
+        this.restoringPage = false;
+        this.restoreTimer = -1;
+        return;
+      }
+      this.scroller.scrollToIndex(page, false, ScrollAlign.START);
+      if (offset > 0) {
+        // scrollToIndex 之后再补页内偏移；scrollBy 的单位为 vp（SDK list.d.ts）。
+        this.restoreTimer = setTimeout(() => {
+          if (token === this.chapterToken) {
+            this.scroller.scrollBy(0, offset);
+            this.targetPage = -1;
+            this.targetPageOffset = 0;
+          }
+          this.restoringPage = false;
+          this.restoreTimer = -1;
+        }, 80);
+      } else {
+        this.targetPage = -1;
+        this.targetPageOffset = 0;
+        this.restoringPage = false;
+        this.restoreTimer = -1;
+      }
     }, 120);
   }
 
@@ -682,6 +805,11 @@ struct ReaderPage {
             RemoteImage({
               url: image.url,
               referer: image.referer,
+              // 只保留当前页前后两页的 PixelMap，避免长章节一次占满内存。
+              active: Math.abs(index - this.currentPage) <= 2,
+              onReady: (ratio: number) => {
+                this.onReaderImageReady(index, ratio);
+              },
               natural: true
             })
           }
@@ -697,11 +825,49 @@ struct ReaderPage {
     .scrollBar(BarState.Off)
     .edgeEffect(EdgeEffect.None)
     .onScrollIndex((first: number) => {
+      // 恢复期间首屏仍可能报告旧索引，不能因此关闭目标页的图片加载。
+      if (this.restoringPage) return;
       if (first !== this.currentPage) {
         this.currentPage = first;
+        this.updatePageOffset(first);
         this.saveProgress();
       }
     })
+    .onScroll(() => {
+      if (!this.restoringPage) {
+        // 以当前可见项的真实矩形为准，避免跨页时用 delta 累加造成漂移。
+        this.updatePageOffset(this.currentPage);
+        this.saveProgress();
+      }
+    })
+  }
+
+  private updatePageOffset(index: number): void {
+    if (this.restoringPage) {
+      return;
+    }
+    try {
+      const rect = this.scroller.getItemRect(index);
+      this.pageOffset = Math.max(0, -rect.y);
+    } catch (error) {
+      // 条目尚未完成布局时保留上次值，避免异常打断滚动。
+    }
+  }
+
+  private onReaderImageReady(index: number, ratio: number): void {
+    this.readyPages.add(index);
+    if (this.targetPage < 0 || index > this.targetPage) {
+      return;
+    }
+    if (ratio <= 0 && index === this.targetPage) {
+      // 目标页加载失败时保留页面可用状态，用户点击重试后再重新恢复。
+      this.targetPage = -1;
+      this.targetPageOffset = 0;
+      this.restoringPage = false;
+      return;
+    }
+    // 目标页拿到真实比例后再校准，避免网络解码前按占位高度恢复产生偏移。
+    this.scrollToTargetPage();
   }
 
   build() {

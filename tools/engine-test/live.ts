@@ -6,8 +6,10 @@ import { ruleFromJson } from './Rules.ts';
 import { parseListItems, parseDetailFields, parseChapters, parseImagesFromJson } from './Engine.ts';
 import { parseHtml } from './Html.ts';
 import fs from 'node:fs';
+import path from 'node:path';
 
-const SRC = 'F:/AI/QoderCN-Data/output/harmony-comic-origin/app/entry/src/main/resources/rawfile/sources/mkzhan.json';
+// 图源规则从当前仓库定位，迁移工作目录后不依赖旧电脑盘符。
+const SRC = path.resolve(import.meta.dirname, '../../app/entry/src/main/resources/rawfile/sources/mkzhan.json');
 const rule = ruleFromJson(parseJson(fs.readFileSync(SRC, 'utf8')));
 const headers = { Referer: 'https://www.mkzhan.com/' };
 let pass = 0;

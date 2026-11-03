@@ -14,6 +14,7 @@ import {
 import { parseHtml, HtmlDocument } from '../parse/Html';
 import { Outcome, ComicBrief, ComicDetail, ChapterBrief, PageImage } from '../model/Models';
 import { resolveUrl } from '../util/Text';
+import { SourceHealth } from './SourceHealth';
 
 /** 图片请求结果：普通源的 images 直接可用；web 源需要页面层做一次无头提取 */
 export class ImageResult {
@@ -50,8 +51,11 @@ export class SourceApi {
       ? await Http.post(url, buildHeaders(rule, rule.baseUrl), rule.charset, body)
       : await Http.get(url, buildHeaders(rule, rule.baseUrl), rule.charset);
     if (!response.ok) {
+      SourceHealth.record(rule.id, false, response.error);
       return Outcome.failure<ComicBrief[]>(`${rule.name}：${response.error}`);
     }
+    // HTTP 请求成功即代表图源可访问；“无匹配结果”不是图源故障。
+    SourceHealth.record(rule.id, true, '最近请求成功');
     try {
       let items: ComicBrief[] = [];
       if (rule.search.responseType === 'json') {
@@ -72,6 +76,8 @@ export class SourceApi {
       }
       // 先解析再看 emptyMarker：页脚/脚本里残留的文案不应盖掉真实结果
       if (items.length === 0) {
+        // HTTP 与解析流程正常，只是关键词没有命中，不应标记图源故障。
+        SourceHealth.record(rule.id, true, '请求成功，无匹配结果');
         if (rule.search.emptyMarker.length > 0 && response.body.indexOf(rule.search.emptyMarker) >= 0) {
           return Outcome.failure<ComicBrief[]>(`${rule.name}：没有这本`);
         }
@@ -80,6 +86,7 @@ export class SourceApi {
       return Outcome.success(items);
     } catch (error) {
       const message = describeError(error);
+      SourceHealth.record(rule.id, false, `解析失败 ${message}`);
       return Outcome.failure<ComicBrief[]>(`${rule.name}：解析失败 ${message}`);
     }
   }
@@ -90,8 +97,10 @@ export class SourceApi {
     const url = resolveUrl(rule.baseUrl, vars.apply(entry.url));
     const response = await Http.get(url, buildHeaders(rule, rule.baseUrl), rule.charset);
     if (!response.ok) {
+      SourceHealth.record(rule.id, false, response.error);
       return Outcome.failure<ComicBrief[]>(`${rule.name}：${response.error}`);
     }
+    SourceHealth.record(rule.id, true, '最近请求成功');
     try {
       const items = parseListItems(
         response.body,
@@ -108,6 +117,7 @@ export class SourceApi {
       return Outcome.success(items);
     } catch (error) {
       const message = describeError(error);
+      SourceHealth.record(rule.id, false, `解析失败 ${message}`);
       return Outcome.failure<ComicBrief[]>(`${rule.name}：解析失败 ${message}`);
     }
   }
@@ -117,8 +127,10 @@ export class SourceApi {
     const url = pageUrl.length > 0 ? pageUrl : resolveUrl(rule.baseUrl, '/' + comicId);
     const response = await Http.get(url, buildHeaders(rule, rule.baseUrl), rule.charset);
     if (!response.ok) {
+      SourceHealth.record(rule.id, false, response.error);
       return Outcome.failure<ComicDetail>(`${rule.name}：${response.error}`);
     }
+    SourceHealth.record(rule.id, true, '最近请求成功');
     try {
       const doc: HtmlDocument = parseHtml(response.body);
       const fields = parseDetailFields(doc, rule, url);
@@ -190,11 +202,13 @@ export class SourceApi {
       }
 
       if (detail.chapters.length === 0) {
+        SourceHealth.record(rule.id, false, '未解析到章节');
         return Outcome.failure<ComicDetail>(`${rule.name}：未解析到章节`);
       }
       return Outcome.success(detail);
     } catch (error) {
       const message = describeError(error);
+      SourceHealth.record(rule.id, false, `解析失败 ${message}`);
       return Outcome.failure<ComicDetail>(`${rule.name}：解析失败 ${message}`);
     }
   }
@@ -232,8 +246,10 @@ export class SourceApi {
       ? vars.apply(rule.images.url) : chapter.url;
     const response: HttpResponse = await Http.get(target, buildHeaders(rule, chapter.url), rule.charset);
     if (!response.ok) {
+      SourceHealth.record(rule.id, false, response.error);
       return Outcome.failure<ImageResult>(`${rule.name}：${response.error}`);
     }
+    SourceHealth.record(rule.id, true, '最近请求成功');
     try {
       if (rule.images.type === 'html') {
         result.images = parseImagesFromHtml(response.body, rule, target);
@@ -249,11 +265,13 @@ export class SourceApi {
         result.images = parseImagesFromJson(response.body, rule, chapter.url);
       }
       if (result.images.length === 0) {
+        SourceHealth.record(rule.id, false, '本章未取到图片');
         return Outcome.failure<ImageResult>(`${rule.name}：本章未取到图片`);
       }
       return Outcome.success(result);
     } catch (error) {
       const message = describeError(error);
+      SourceHealth.record(rule.id, false, `图片解析失败 ${message}`);
       return Outcome.failure<ImageResult>(`${rule.name}：图片解析失败 ${message}`);
     }
   }
