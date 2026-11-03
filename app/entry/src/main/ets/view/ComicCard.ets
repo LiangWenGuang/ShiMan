@@ -35,10 +35,10 @@ export struct ComicCard {
             Stack({ alignContent: Alignment.BottomStart }) {
               Text(this.subtitle)
                 .fontSize(Theme.fsMicro)
-                .fontColor('#EAF1FB')
+                .fontColor(Theme.text)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .padding({ left: 8, right: 8, top: 12, bottom: 6 })
+                .padding({ left: Theme.gapS, right: Theme.gapS, top: Theme.gapM, bottom: 6 })
                 .width('100%')
             }
             .width('100%')
@@ -57,10 +57,10 @@ export struct ComicCard {
               .fontSize(11)
               .fontColor(['#FFC46B'])
           }
-          .padding({ left: 5, right: 5, top: 3, bottom: 3 })
-          .backgroundColor('#99000000')
+          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .backgroundColor('#B0000000')
           .borderRadius(Theme.radiusPill)
-          .margin({ top: 6, right: 6 })
+          .margin({ top: Theme.gapS, right: Theme.gapS })
         }
       }
       .width('100%')
@@ -71,23 +71,24 @@ export struct ComicCard {
           .fontColor(Theme.accent)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .padding({ left: Theme.gapS, right: Theme.gapS, top: 3, bottom: 3 })
           .backgroundColor(Theme.accentDim)
           .borderRadius(Theme.radiusS - 2)
-          .margin({ top: 8 })
+          .margin({ top: Theme.gapS })
       }
 
       Text(this.title)
         .fontSize(Theme.fsLabel + 1)
-        .lineHeight(19)
+        .lineHeight(20)
         .fontWeight(FontWeight.Medium)
         .fontColor(Theme.text)
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .margin({ top: 8 })
+        // 标签存在时与标签保持统一节奏；无标签时仍保留一段呼吸空间。
+        .margin({ top: Theme.gapS })
         .width('100%')
         // 固定两行高度：标题一行的卡片不会把整排压得高低不齐
-        .height(38)
+        .height(40)
     }
     .width('100%')
     .onClick(() => {

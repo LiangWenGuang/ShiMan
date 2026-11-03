@@ -12,16 +12,18 @@ export class Theme {
   static nav: string = '#0F141B';
   static surface: string = '#171D26';
   static surfaceHi: string = '#1F2733';
+  /** 浮层与卡片的轻背景，用于把可点击内容从页面底色中托起 */
+  static surfaceRaised: string = '#202936';
   static line: string = '#242C38';
 
   // ── 文字：三级 ──
   static text: string = '#F4F7FB';
-  static textSub: string = '#A7B2C1';
-  static textDim: string = '#6E7B8D';
+  static textSub: string = '#B4BFCE';
+  static textDim: string = '#8290A2';
 
   // ── 强调色 ──
-  static accent: string = '#4C8DFF';
-  static accentDim: string = '#1C2B45';
+  static accent: string = '#67A0FF';
+  static accentDim: string = '#203454';
   static onAccent: string = '#0A1220';
   static warn: string = '#E3A552';
   static ok: string = '#57C68A';

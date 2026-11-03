@@ -51,6 +51,55 @@ export function absUrl(base: string, href: string): string {
   }
 }
 
+const URL_SCHEME = new RegExp('^[a-zA-Z][a-zA-Z0-9+.-]*://');
+
+/** 将规则中的相对链接解析为绝对链接，支持协议相对、查询参数及 .. 路径。 */
+export function resolveUrl(base: string, relative: string): string {
+  const raw = relative.trim();
+  if (raw.length === 0) return base;
+  if (URL_SCHEME.test(raw) || raw.startsWith('data:')) return raw;
+  if (raw.startsWith('//')) return (base.startsWith('https://') ? 'https:' : 'http:') + raw;
+  // 纯锚点保留当前页面路径及查询参数，不按目录拼接。
+  if (raw.startsWith('#')) return base.split('#')[0] + raw;
+  const hashBase = base.split('#')[0];
+  const scheme = hashBase.indexOf('://');
+  if (scheme < 0) return raw;
+  const hostStart = scheme + 3;
+  const authorityEnd = hashBase.substring(hostStart).search(/[/?]/);
+  const boundary = authorityEnd < 0 ? hashBase.length : hostStart + authorityEnd;
+  const origin = hashBase.substring(0, boundary);
+  let path = hashBase.substring(boundary);
+  if (!path.startsWith('/')) path = '/' + path;
+  if (raw.startsWith('/')) return origin + raw;
+  if (raw.startsWith('?')) {
+    const q = path.indexOf('?');
+    return origin + (q >= 0 ? path.substring(0, q) : path) + raw;
+  }
+  const q = path.indexOf('?');
+  if (q >= 0) path = path.substring(0, q);
+  const last = path.lastIndexOf('/');
+  // 查询参数里的斜线不属于路径，先分离再折叠 . 和 ..。
+  const suffixAt = raw.search(/[?#]/);
+  const relativePath = suffixAt < 0 ? raw : raw.substring(0, suffixAt);
+  const suffix = suffixAt < 0 ? '' : raw.substring(suffixAt);
+  const merged = (last >= 0 ? path.substring(0, last + 1) : '/') + relativePath;
+  const parts = merged.split('/');
+  const stack: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] === '' || parts[i] === '.') continue;
+    if (parts[i] === '..') {
+      if (stack.length > 0) stack.pop();
+    } else stack.push(parts[i]);
+  }
+  const trailing = merged.endsWith('/') || merged.endsWith('/.') || merged.endsWith('/..');
+  return origin + '/' + stack.join('/') + (trailing && stack.length > 0 ? '/' : '') + suffix;
+}
+
+/** 规则模板单键替换。 */
+export function applyTemplate(template: string, key: string, value: string): string {
+  return template.split('{' + key + '}').join(value);
+}
+
 export function firstCaptureOf(text: string, pattern: string): string {
   if (!pattern || pattern.length === 0) {
     return '';
@@ -153,14 +202,63 @@ export function similarity(a: string, b: string): number {
 }
 
 export function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(parseInt(n, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCharCode(parseInt(h, 16)));
+  return decodeEntities(s);
+}
+
+/** HTML 实体解码，避免 ArkTS 对正则回调隐式 any 的限制。 */
+export function decodeEntities(input: string): string {
+  let out = input.split('&nbsp;').join(' ').split('&amp;').join('&')
+    .split('&lt;').join('<').split('&gt;').join('>').split('&quot;').join('"')
+    .split('&#39;').join("'").split('&apos;').join("'");
+  const numeric = new RegExp('&#(x?)([0-9a-fA-F]+);', 'g');
+  let match: RegExpExecArray | null = numeric.exec(out);
+  while (match !== null) {
+    const code = match[1] === 'x' ? parseInt(match[2], 16) : parseInt(match[2], 10);
+    if (!isNaN(code) && code >= 0 && code <= 0x10ffff) {
+      // 补充平面字符需要代理对，避免表情或生僻字被截断为单个 UTF-16 字符。
+      const decoded = code <= 0xffff ? String.fromCharCode(code) :
+        String.fromCharCode(0xd800 + ((code - 0x10000) >> 10), 0xdc00 + ((code - 0x10000) & 0x3ff));
+      out = out.replace(match[0], decoded);
+      numeric.lastIndex = 0;
+    }
+    match = numeric.exec(out);
+  }
+  return out;
+}
+
+export function compact(input: string): string {
+  return input.replace(/\s+/g, ' ').trim();
+}
+
+export function extractNumericId(url: string): string {
+  let path = url;
+  const scheme = path.indexOf('://');
+  if (scheme >= 0) {
+    const slash = path.indexOf('/', scheme + 3);
+    path = slash >= 0 ? path.substring(slash) : '/';
+  }
+  const query = path.indexOf('?');
+  if (query >= 0) path = path.substring(0, query);
+  const runs = path.match(/\d{2,}/g);
+  if (runs !== null && runs.length > 0) {
+    let best = runs[0];
+    for (let i = 1; i < runs.length; i++) if (runs[i].length > best.length) best = runs[i];
+    return best;
+  }
+  const fallback = url.match(/\d{2,}/);
+  return fallback === null ? '' : fallback[0];
+}
+
+export function toHttps(url: string): string {
+  return url.startsWith('http://') ? 'https://' + url.substring(7) : url;
+}
+
+export function shortTime(raw: string): string {
+  const full = raw.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (full !== null) return `${full[2]}-${full[3]}`;
+  const short = raw.match(/(\d{1,2})[-/](\d{1,2})/);
+  if (short !== null) return `${short[1]}-${short[2]}`;
+  return raw.length > 10 ? raw.substring(0, 10) : raw;
 }
 
 export function safeJsonParse(text: string): Object | null {
@@ -182,7 +280,7 @@ export function pickString(obj: Object | null, path: string): string {
       return '';
     }
     const rec = cur as Record<string, Object>;
-    if (!(p in rec)) {
+    if (Object.keys(rec).indexOf(p) < 0) {
       return '';
     }
     cur = rec[p] as Object;
@@ -204,7 +302,7 @@ export function pickArray(obj: Object | null, path: string): Object[] {
       return [];
     }
     const rec = cur as Record<string, Object>;
-    if (!(p in rec)) {
+    if (Object.keys(rec).indexOf(p) < 0) {
       return [];
     }
     cur = rec[p] as Object;

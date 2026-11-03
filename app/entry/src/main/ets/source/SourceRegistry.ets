@@ -127,15 +127,21 @@ export class SourceRegistry {
   }
 
   isEnabled(id: string): boolean {
-    return !this.disabled.has(id);
+    return this.rules.has(id) && !this.disabled.has(id);
   }
 
   async setEnabled(id: string, value: boolean): Promise<void> {
+    // 忽略未知 ID，避免无效偏好污染当前源选择。
+    if (!this.rules.has(id)) {
+      return;
+    }
     if (value) {
       this.disabled.delete(id);
     } else {
       this.disabled.add(id);
     }
+    // 禁用当前源时同步回退到首个启用源；全部禁用时保存空值。
+    this.currentId = this.currentSourceId();
     await this.flush();
   }
 
@@ -149,6 +155,7 @@ export class SourceRegistry {
     });
     try {
       await this.store.put(KEY_DISABLED, ids.join(','));
+      await this.store.put(KEY_CURRENT, this.currentId);
       await this.store.flush();
     } catch (error) {
       // 写入失败只影响下次启动的启用状态，不抛给 UI
@@ -156,7 +163,7 @@ export class SourceRegistry {
   }
 
   currentSourceId(): string {
-    if (this.currentId.length > 0 && this.find(this.currentId) !== null) {
+    if (this.currentId.length > 0 && this.isEnabled(this.currentId)) {
       return this.currentId;
     }
     const list = this.enabled();
@@ -164,6 +171,10 @@ export class SourceRegistry {
   }
 
   async setCurrent(id: string): Promise<void> {
+    // 当前源必须来自已启用的注册规则，不能绕过禁用状态。
+    if (!this.isEnabled(id)) {
+      return;
+    }
     this.currentId = id;
     if (this.store === null) {
       return;

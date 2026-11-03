@@ -610,15 +610,16 @@ export async function decryptAesCbc(cipherBase64: string, key: string, ivText: s
     const cipherBytes: Uint8Array = base64Helper.decodeSync(cipherBase64);
 
     const keyRaw = buffer.from(key, 'utf-8');
-    const keyBytes: Uint8Array = new Uint8Array(keyRaw.byteLength);
-    keyBytes.set(new Uint8Array(keyRaw.buffer, keyRaw.byteOffset, keyRaw.byteLength));
+    // Buffer 在 ArkTS 中暴露 length；按实际 UTF-8 字节长度构造 AES 密钥。
+    const keyBytes: Uint8Array = new Uint8Array(keyRaw.length);
+    keyBytes.set(new Uint8Array(keyRaw.buffer, keyRaw.byteOffset, keyRaw.length));
     const symKeyBlob: cryptoFramework.DataBlob = { data: keyBytes };
     const keyGenerator = cryptoFramework.createSymKeyGenerator('AES128');
     const symKey = await keyGenerator.convertKey(symKeyBlob);
 
     const ivRaw = buffer.from(ivText, 'utf-8');
-    const ivBytes: Uint8Array = new Uint8Array(ivRaw.byteLength);
-    ivBytes.set(new Uint8Array(ivRaw.buffer, ivRaw.byteOffset, ivRaw.byteLength));
+    const ivBytes: Uint8Array = new Uint8Array(ivRaw.length);
+    ivBytes.set(new Uint8Array(ivRaw.buffer, ivRaw.byteOffset, ivRaw.length));
     const ivParams: cryptoFramework.IvParamsSpec = {
       algName: 'IvParamsSpec',
       iv: { data: ivBytes }

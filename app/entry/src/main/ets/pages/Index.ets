@@ -84,6 +84,8 @@ struct Index {
   @State sourceSheetShown: boolean = false;
   /** 搜索框失焦令牌：延迟隐藏历史，避免点历史项时先被 blur 隐藏 */
   private blurToken: number = 0;
+  // 每次搜索独立编号，只允许最近一次请求更新页面。
+  private searchToken: number = 0;
 
   // 书架 / 收藏
   @State shelf: ShelfItem[] = [];
@@ -102,6 +104,9 @@ struct Index {
     this.refreshSources();
     if (previousSourceId !== this.currentSourceId && this.homeCurrentOnly) {
       this.loadHome();
+    }
+    if (previousSourceId !== this.currentSourceId && !this.searchAll) {
+      this.resetSearch();
     }
     this.shelf = Library.get().shelf();
     this.favorites = Library.get().favorites();
@@ -173,7 +178,9 @@ struct Index {
     const registry = SourceRegistry.get();
     const rule = registry.find(registry.currentSourceId());
     // 令聚合那一路的迟到结果作废
-    this.discoverToken++;
+    const token = ++this.discoverToken;
+    this.discoverLoading = false;
+    this.discoverProgress = '';
     if (rule === null) {
       this.discover = [];
       this.discoverError = '还没有可用图源\n请到「我的 → 图源管理」启用';
@@ -193,6 +200,10 @@ struct Index {
     this.discoverLoading = true;
     this.discoverError = '';
     const outcome = await SourceApi.browse(rule, rule.browse[safeIndex], 1);
+    // 切源或切换聚合模式后，旧请求不能覆盖新列表和加载状态。
+    if (token !== this.discoverToken) {
+      return;
+    }
     this.discoverLoading = false;
     this.refreshing = false;
     if (outcome.ok && outcome.value !== undefined) {
@@ -285,6 +296,7 @@ struct Index {
       return;
     }
     // 记录搜索历史
+    const token = ++this.searchToken;
     Library.get().addSearchHistory(kw);
     this.searchHistoryShown = false;
     this.searchLoading = true;
@@ -298,6 +310,9 @@ struct Index {
       const list = registry.enabled();
       for (let i = 0; i < list.length; i++) {
         const outcome = await SourceApi.search(list[i], kw, 1);
+        if (token !== this.searchToken) {
+          return;
+        }
         if (outcome.ok && outcome.value !== undefined) {
           for (let k = 0; k < outcome.value.length; k++) {
             merged.push(outcome.value[k]);
@@ -310,10 +325,15 @@ struct Index {
       const rule = registry.find(registry.currentSourceId());
       if (rule === null) {
         this.searchLoading = false;
+        this.searchDone = true;
+        this.searchResults = [];
         this.searchError = '还没有启用任何图源';
         return;
       }
       const outcome = await SourceApi.search(rule, kw, 1);
+      if (token !== this.searchToken) {
+        return;
+      }
       if (outcome.ok && outcome.value !== undefined) {
         for (let k = 0; k < outcome.value.length; k++) {
           merged.push(outcome.value[k]);
@@ -331,6 +351,15 @@ struct Index {
     } else if (errors.length > 0) {
       this.searchError = `部分图源失败：${errors.join('；')}`;
     }
+  }
+
+  private resetSearch(): void {
+    // 搜索范围改变后同时清空旧结果并使在途请求失效，避免标签与内容不一致。
+    this.searchToken++;
+    this.searchLoading = false;
+    this.searchDone = false;
+    this.searchResults = [];
+    this.searchError = '';
   }
 
   /** 取图源站点地址，作为封面下载的 Referer（部分 CDN 有防盗链） */
@@ -820,6 +849,9 @@ struct Index {
       .borderRadius(Theme.radiusPill)
       .textAlign(TextAlign.Center)
       .onClick(() => {
+        if (this.searchAll !== all) {
+          this.resetSearch();
+        }
         this.searchAll = all;
       })
   }
@@ -957,6 +989,9 @@ struct Index {
   }
 
   private async switchCurrentSource(id: string): Promise<void> {
+    if (!this.searchAll) {
+      this.resetSearch();
+    }
     await SourceRegistry.get().setCurrent(id);
     this.refreshSources();
     // 「只看当前图源」模式下换源必须重拉首页；聚合模式不受影响
@@ -1387,7 +1422,6 @@ struct Index {
 
   // ─────────────────────────── 我的 ───────────────────────────
 
-  @Builder
   /**
    * 「我的」页的一行。右侧数值按 valueKey **现算**（读 @State），
    * 否则收藏/书架/历史数量变了这里不会跟着变。

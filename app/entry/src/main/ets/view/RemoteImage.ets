@@ -7,17 +7,23 @@
 
 import { image } from '@kit.ImageKit';
 import { ImageLoader } from '../net/ImageLoader';
+import { HttpHeader } from '../net/Http';
 
 @Component
 export struct RemoteImage {
-  url: string = '';
-  referer: string = '';
+  @Prop @Watch('imageChanged') url: string = '';
+  @Prop @Watch('imageChanged') referer: string = '';
   ratio: number = 0.75;
   corner: number = 0;
   natural: boolean = false;
   @State pm: image.PixelMap | undefined = undefined;
   @State failed: boolean = false;
   private token: number = 0;
+
+  private imageChanged(): void {
+    // 同一个列表节点被复用时，重新加载地址并清理上一张图的失败状态。
+    this.fetch();
+  }
 
   aboutToAppear(): void {
     this.fetch();
@@ -42,7 +48,14 @@ export struct RemoteImage {
 
   private async fetch(): Promise<void> {
     const current = ++this.token;
-    const result = await ImageLoader.load(this.url, this.referer);
+    this.failed = false;
+    this.release();
+    // 下载接口接收请求头集合；仅对有来源的图片附加防盗链 Referer。
+    const headers: HttpHeader[] = [];
+    if (this.referer.length > 0) {
+      headers.push(new HttpHeader('Referer', this.referer));
+    }
+    const result = await ImageLoader.loadPixelMap(this.url, headers);
     if (current !== this.token) {
       if (result !== null) {
         try {

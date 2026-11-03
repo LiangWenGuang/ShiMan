@@ -61,10 +61,15 @@ export class ImageLoader {
         return null;
       }
       const source = image.createImageSource(bytes);
-      const pixelMap = await source.createPixelMap();
-      // 仅在解码成功后缓存，防止把 404/HTML/截断响应写进 LRU
-      ImageLoader.touch(url, bytes);
-      return pixelMap;
+      try {
+        const pixelMap = await source.createPixelMap();
+        // 仅在解码成功后缓存，防止把 404/HTML/截断响应写进 LRU。
+        ImageLoader.touch(url, bytes);
+        return pixelMap;
+      } finally {
+        // PixelMap 独立持有解码结果，释放源对象避免长列表持续占用解码资源。
+        source.release();
+      }
     } catch (e) {
       // 解码失败时丢掉可能已污染的缓存条目
       ImageLoader.bytesCache.delete(url);
