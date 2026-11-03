@@ -4,6 +4,7 @@ import { SourceApi } from '../source/SourceApi';
 import { SourceRule } from '../rule/Rules';
 import { ComicDetail, ChapterBrief, ShelfItem, ReadProgress } from '../model/Models';
 import { Library } from '../store/Library';
+import { chaptersForDisplay } from '../util/ChapterOrder';
 import { DetailParams, ReaderParams, SwitchParams } from '../model/RouteParams';
 import { SwitchBus, SwitchPending } from '../store/SwitchBus';
 import { RemoteImage } from '../view/RemoteImage';
@@ -130,11 +131,7 @@ struct DetailPage {
     if (this.detail === null) {
       return [];
     }
-    const items: ChapterBrief[] = this.detail.chapters.slice();
-    if (this.chapterDescending) {
-      items.reverse();
-    }
-    return items;
+    return chaptersForDisplay(this.detail.chapters, this.chapterDescending);
   }
 
   /** 正序时把当前章纳入已展开窗口；倒序时当前章靠后，强行展开会一次性铺完整个列表 */
@@ -500,7 +497,7 @@ struct DetailPage {
           .fontColor(Theme.text)
           .margin({ left: 8 })
         Blank()
-        Text(this.chapterDescending ? '倒序 ↓' : '正序 ↑')
+        Text(this.chapterDescending ? '当前：倒序 ↓' : '当前：正序 ↑')
           .fontSize(Theme.fsLabel)
           .fontWeight(FontWeight.Medium)
           .fontColor(Theme.accent)

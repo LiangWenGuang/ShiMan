@@ -14,6 +14,7 @@ import {
 import { parseHtml, HtmlDocument } from '../parse/Html';
 import { Outcome, ComicBrief, ComicDetail, ChapterBrief, PageImage } from '../model/Models';
 import { resolveUrl } from '../util/Text';
+import { normalizeChapterOrder } from '../util/ChapterOrder';
 import { SourceHealth } from './SourceHealth';
 
 /** 图片请求结果：普通源的 images 直接可用；web 源需要页面层做一次无头提取 */
@@ -148,7 +149,7 @@ export class SourceApi {
       if (rule.chapters.json.enabled()) {
         if (rule.chapters.json.source === 'inline') {
           const jsonText = readEmbeddedJson(doc, rule.chapters.json.selector);
-          detail.chapters = parseChaptersFromJson(jsonText, rule, url, comicId);
+          detail.chapters = parseChaptersFromJson(jsonText, rule, url, comicId, false);
         } else {
           const jsonUrl = new UrlVars()
             .set('comicId', comicId)
@@ -171,18 +172,12 @@ export class SourceApi {
               const htmlChapters = parseChapters(doc, rule, url, false);
               const jsonChapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId, false);
               detail.chapters = mergeChapters(htmlChapters, jsonChapters);
-              if (rule.chapters.reverse) {
-                detail.chapters.reverse();
-                for (let i = 0; i < detail.chapters.length; i++) {
-                  detail.chapters[i].index = i;
-                }
-              }
             } else {
-              detail.chapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId);
+              detail.chapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId, false);
             }
           } else {
             // 接口挂了时至少用详情页上已有的目录，避免整本「未解析到章节」
-            detail.chapters = parseChapters(doc, rule, url);
+            detail.chapters = parseChapters(doc, rule, url, false);
           }
         }
       } else if (rule.chapters.url.length > 0) {
@@ -195,11 +190,14 @@ export class SourceApi {
           resolveUrl(rule.baseUrl, chapterUrl), buildHeaders(rule, url), rule.charset);
         if (chapterResponse.ok) {
           detail.chapters = parseChapters(parseHtml(chapterResponse.body), rule,
-            resolveUrl(rule.baseUrl, chapterUrl));
+            resolveUrl(rule.baseUrl, chapterUrl), false);
         }
       } else {
-        detail.chapters = parseChapters(doc, rule, url);
+        detail.chapters = parseChapters(doc, rule, url, false);
       }
+
+      // 所有入口统一应用图源方向，保证 Reader 使用的 chapterIndex 是阅读顺序索引。
+      detail.chapters = normalizeChapterOrder(detail.chapters, rule.chapters.reverse);
 
       if (detail.chapters.length === 0) {
         SourceHealth.record(rule.id, false, '未解析到章节');

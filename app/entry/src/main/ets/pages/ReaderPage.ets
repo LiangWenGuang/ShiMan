@@ -74,6 +74,8 @@ struct ReaderPage {
   private bootstrapToken: number = 0;
   /** 合并快速滚动产生的进度写入，降低 Preferences 持久化频率。 */
   private progressTimer: number = -1;
+  /** 等待列表完成一次布局后再读取条目矩形，避免 onScroll 回调拿到旧坐标。 */
+  private offsetMeasureTimer: number = -1;
 
   aboutToAppear(): void {
     // router.getParams() 返回的是普通对象，ArkTS 下直接 `as ReaderParams` 强转后
@@ -130,6 +132,21 @@ struct ReaderPage {
     if (this.progressTimer >= 0) {
       clearTimeout(this.progressTimer);
       this.progressTimer = -1;
+    }
+    if (this.offsetMeasureTimer >= 0) {
+      clearTimeout(this.offsetMeasureTimer);
+      this.offsetMeasureTimer = -1;
+    }
+    // 页面即将销毁时不能等待下一次 onScroll；先解除恢复保护并读取当前条目的
+    // 最终矩形，避免取消定时器后仍把旧 pageOffset 写回历史。
+    const wasRestoring = this.restoringPage;
+    this.restoringPage = false;
+    if (!this.loading && !this.harvesting && this.images.length > 0) {
+      this.updatePageOffset(this.currentPage);
+      if (wasRestoring) {
+        this.targetPage = -1;
+        this.targetPageOffset = 0;
+      }
     }
     // 取图未完成时不写入空页，避免覆盖已有的有效阅读进度。
     if (!this.loading && !this.harvesting && this.images.length > 0) {
@@ -231,7 +248,7 @@ struct ReaderPage {
     }
     this.targetPageOffset = this.params.pageOffset > 0 ? this.params.pageOffset : 0;
     this.targetPage = this.params.page > 0 || this.targetPageOffset > 0 ? this.params.page : -1;
-    await this.loadChapter(start);
+    await this.loadChapter(start, true);
     this.scrollToTargetPage();
   }
 
@@ -289,7 +306,7 @@ struct ReaderPage {
     return '';
   }
 
-  private async loadChapter(index: number): Promise<void> {
+  private async loadChapter(index: number, preserveRestore: boolean = false): Promise<void> {
     if (this.detail === null) {
       return;
     }
@@ -305,6 +322,16 @@ struct ReaderPage {
       return;
     }
     const token = ++this.chapterToken;
+    // 只有启动续读保留恢复目标；用户切章必须清除旧章节的页内偏移。
+    if (this.restoreTimer >= 0) clearTimeout(this.restoreTimer);
+    this.restoreTimer = -1;
+    if (this.offsetMeasureTimer >= 0) clearTimeout(this.offsetMeasureTimer);
+    this.offsetMeasureTimer = -1;
+    this.restoringPage = false;
+    if (!preserveRestore) {
+      this.targetPage = -1;
+      this.targetPageOffset = 0;
+    }
     this.readyPages.clear();
     this.loading = true;
     this.error = '';
@@ -485,6 +512,11 @@ struct ReaderPage {
     if (this.targetPage < 0 || this.images.length === 0) {
       return;
     }
+    // 目标页前后图片可能连续回调 onReady；已有恢复定时器时不要重复发起
+    // scrollToIndex，否则后到的解码回调会把刚完成的校准再次推回旧位置。
+    if (this.restoringPage && this.restoreTimer >= 0) {
+      return;
+    }
     const page = this.targetPage < this.images.length ? this.targetPage : this.images.length - 1;
     this.targetPage = page;
     let sizesReady = true;
@@ -494,11 +526,16 @@ struct ReaderPage {
     if (!sizesReady) {
       this.currentPage = page;
       this.restoringPage = true;
-      const token = this.chapterToken;
-      this.restoreTimer = setTimeout(() => {
-        if (token === this.chapterToken) this.scroller.scrollToIndex(page, false, ScrollAlign.START);
-        this.restoreTimer = -1;
-      }, 100);
+      // 目标页及其前两页尚未拿到真实比例时不提前滚动；提前滚动会把占位高度
+      // 当成最终高度，随后图片解码会把目标页推到上方约数百 vp。
+      Trace.write('reader', 'restore waiting page=' + page + ' ready=' + this.readyPages.size);
+      // 远页可能尚未被 List 实例化；先定位到目标项只用于激活其前后图片，
+      // 不清除 targetPage，真实尺寸就绪后仍会再次执行带偏移的恢复。
+      try {
+        this.scroller.scrollToIndex(page, false, ScrollAlign.START);
+      } catch (error) {
+        Trace.write('reader', 'restore prime scroll failed page=' + page);
+      }
       return;
     }
     const offset = this.targetPageOffset;
@@ -513,24 +550,54 @@ struct ReaderPage {
         return;
       }
       this.scroller.scrollToIndex(page, false, ScrollAlign.START);
-      if (offset > 0) {
-        // scrollToIndex 之后再补页内偏移；scrollBy 的单位为 vp（SDK list.d.ts）。
-        this.restoreTimer = setTimeout(() => {
-          if (token === this.chapterToken) {
-            this.scroller.scrollBy(0, offset);
-            this.targetPage = -1;
-            this.targetPageOffset = 0;
-          }
-          this.restoringPage = false;
-          this.restoreTimer = -1;
-        }, 80);
-      } else {
+      // scrollToIndex 之后再补页内偏移，并在布局稳定后读取真实 y 做差值校准。
+      // 直接相信 onScroll/getItemRect 的第一次结果会留下约 300vp 的恢复误差。
+      if (offset > 0) this.scroller.scrollBy(0, offset);
+      this.calibrateRestore(page, offset, token, 0);
+    }, 120);
+  }
+
+  /**
+   * 图片解码和 List 重排是异步的，恢复滚动后需要再次读取目标项真实坐标。
+   * 最多做三次小步修正，既覆盖慢图源，也避免在异常布局时永久阻塞阅读器。
+   */
+  private calibrateRestore(page: number, expected: number, token: number, attempt: number): void {
+    this.restoreTimer = setTimeout(() => {
+      if (token !== this.chapterToken) {
+        this.restoringPage = false;
+        this.restoreTimer = -1;
+        return;
+      }
+      try {
+        const rect = this.scroller.getItemRect(page);
+        const actual = Math.max(0, -rect.y);
+        const delta = expected - actual;
+        Trace.write('reader', 'restore measure page=' + page + ' attempt=' + attempt +
+          ' rectY=' + rect.y + ' actual=' + actual + ' expected=' + expected + ' delta=' + delta);
+        if (Math.abs(delta) > 3 && attempt < 3) {
+          this.scroller.scrollBy(0, delta);
+          this.calibrateRestore(page, expected, token, attempt + 1);
+          return;
+        }
+        this.pageOffset = actual;
         this.targetPage = -1;
         this.targetPageOffset = 0;
         this.restoringPage = false;
         this.restoreTimer = -1;
+      } catch (error) {
+        Trace.write('reader', 'restore measure failed page=' + page + ' attempt=' + attempt);
+        if (attempt < 3) {
+          this.calibrateRestore(page, expected, token, attempt + 1);
+        } else {
+          // 最终测量失败也必须消费恢复目标，否则后续滚动会一直被
+          // targetPage >= 0 拦截，进度永远无法落盘。
+          this.targetPage = -1;
+          this.targetPageOffset = 0;
+          this.restoringPage = false;
+          this.restoreTimer = -1;
+        }
       }
-    }, 120);
+    }, attempt === 0 ? 160 : 100);
   }
 
   /** 目录按当前排序显示，翻的是副本；上一章/下一章仍按原始章节顺序 */
@@ -829,17 +896,25 @@ struct ReaderPage {
       if (this.restoringPage) return;
       if (first !== this.currentPage) {
         this.currentPage = first;
-        this.updatePageOffset(first);
-        this.saveProgress();
+        this.scheduleProgressCapture(first);
       }
     })
     .onScroll(() => {
       if (!this.restoringPage) {
-        // 以当前可见项的真实矩形为准，避免跨页时用 delta 累加造成漂移。
-        this.updatePageOffset(this.currentPage);
-        this.saveProgress();
+        // onScroll 可能早于布局提交触发，延迟读取矩形，确保保存的是最终坐标。
+        this.scheduleProgressCapture(this.currentPage);
       }
     })
+  }
+
+  private scheduleProgressCapture(index: number): void {
+    if (this.offsetMeasureTimer >= 0) clearTimeout(this.offsetMeasureTimer);
+    this.offsetMeasureTimer = setTimeout(() => {
+      this.offsetMeasureTimer = -1;
+      if (this.restoringPage || this.loading || this.harvesting || this.targetPage >= 0) return;
+      this.updatePageOffset(index);
+      this.saveProgress();
+    }, 160);
   }
 
   private updatePageOffset(index: number): void {
@@ -849,8 +924,10 @@ struct ReaderPage {
     try {
       const rect = this.scroller.getItemRect(index);
       this.pageOffset = Math.max(0, -rect.y);
+      Trace.write('reader', 'progress measure page=' + index + ' rectY=' + rect.y + ' offset=' + this.pageOffset);
     } catch (error) {
       // 条目尚未完成布局时保留上次值，避免异常打断滚动。
+      Trace.write('reader', 'progress measure failed page=' + index);
     }
   }
 
@@ -861,6 +938,10 @@ struct ReaderPage {
     }
     if (ratio <= 0 && index === this.targetPage) {
       // 目标页加载失败时保留页面可用状态，用户点击重试后再重新恢复。
+      if (this.restoreTimer >= 0) {
+        clearTimeout(this.restoreTimer);
+        this.restoreTimer = -1;
+      }
       this.targetPage = -1;
       this.targetPageOffset = 0;
       this.restoringPage = false;

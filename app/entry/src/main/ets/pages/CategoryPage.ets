@@ -24,6 +24,8 @@ struct CategoryPage {
   @State comics: ComicBrief[] = [];
   @State loading: boolean = false;
   @State error: string = '';
+  /** 横向图源列表的滚动控制器，用于进入页面时定位当前数据源。 */
+  private sourceBarScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
     const registry = SourceRegistry.get();
@@ -31,6 +33,29 @@ struct CategoryPage {
     this.pageSourceId = registry.currentSourceId();
     this.refreshTypes();
     this.loadBrowse(0);
+    // 图源栏首次渲染前尚未完成测量，延迟定位才能让 List 正确滚到当前源。
+    setTimeout(() => {
+      this.scrollSourceBarToCurrent();
+    }, 80);
+  }
+
+  /** 仅调整图源栏的可视位置，不改变本页已选图源或全局当前图源。 */
+  private scrollSourceBarToCurrent(): void {
+    let position: number = -1;
+    for (let i = 0; i < this.sources.length; i++) {
+      if (this.sources[i].id === this.pageSourceId) {
+        position = i;
+        break;
+      }
+    }
+    if (position <= 0) {
+      return;
+    }
+    try {
+      this.sourceBarScroller.scrollToIndex(position);
+    } catch (error) {
+      // 页面布局尚未稳定时滚动可能失败，避免影响分类内容加载。
+    }
   }
 
   /** 读取当前数据源提供的排行/分类类型 */
@@ -152,9 +177,9 @@ struct CategoryPage {
   /** 数据源横向切换栏 */
   @Builder
   sourceBar() {
-    Scroll() {
-      Row() {
-        ForEach(this.sources, (rule: SourceRule) => {
+    List({ scroller: this.sourceBarScroller }) {
+      ForEach(this.sources, (rule: SourceRule) => {
+        ListItem() {
           Text(rule.name)
             .fontSize(Theme.fsLabel)
             .fontWeight(rule.id === this.pageSourceId ? FontWeight.Medium : FontWeight.Normal)
@@ -163,19 +188,20 @@ struct CategoryPage {
             .padding({ left: 14, right: 14 })
             .backgroundColor(rule.id === this.pageSourceId ? Theme.accentDim : Color.Transparent)
             .borderRadius(Theme.radiusPill)
-            .margin({ right: Theme.gapS })
             .textAlign(TextAlign.Center)
             .onClick(() => {
               this.switchSource(rule.id);
             })
-        }, (rule: SourceRule) => `rb_src_${rule.id}`)
-      }
-      .padding({ left: Theme.gapL, right: Theme.gapL })
+        }
+        .margin({ right: Theme.gapS })
+      }, (rule: SourceRule) => `rb_src_${rule.id}`)
     }
-    .scrollable(ScrollDirection.Horizontal)
+    .listDirection(Axis.Horizontal)
+    // 横向 List 必须约束交叉轴高度，避免占满页面挤掉下方分类内容。
+    .height(58)
     .scrollBar(BarState.Off)
     .width('100%')
-    .padding({ top: Theme.gapS, bottom: Theme.gapM })
+    .padding({ left: Theme.gapL, right: Theme.gapL, top: Theme.gapS, bottom: Theme.gapM })
   }
 
   /** 左侧类型栏 */

@@ -103,6 +103,8 @@ struct Index {
   private blurToken: number = 0;
   // 每次搜索独立编号，只允许最近一次请求更新页面。
   private searchToken: number = 0;
+  /** 图源选择列表的滚动控制器；打开弹层后定位到当前图源，仍由用户手动确认切换。 */
+  private sourceSheetScroller: Scroller = new Scroller();
 
   // 书架 / 收藏
   @State shelf: ShelfItem[] = [];
@@ -1019,6 +1021,29 @@ struct Index {
       return;
     }
     this.sourceSheetShown = true;
+    // 弹层首次渲染前列表尚未完成测量，延迟到下一轮布局后再定位，避免滚动失效。
+    setTimeout(() => {
+      this.scrollSourceSheetToCurrent();
+    }, 80);
+  }
+
+  /** 将图源弹层滚到当前源，避免启用源较多时用户从列表顶部查找。 */
+  private scrollSourceSheetToCurrent(): void {
+    let position: number = -1;
+    for (let i = 0; i < this.sources.length; i++) {
+      if (this.sources[i].id === this.currentSourceId) {
+        position = i;
+        break;
+      }
+    }
+    if (position <= 0) {
+      return;
+    }
+    try {
+      this.sourceSheetScroller.scrollToIndex(position);
+    } catch (error) {
+      // 列表尚未完成布局时 SDK 可能暂时拒绝滚动，下一次打开弹层会再次尝试。
+    }
   }
 
   private async switchCurrentSource(id: string): Promise<void> {
@@ -1075,7 +1100,7 @@ struct Index {
           .width('100%')
           .padding({ left: Theme.gapL, right: Theme.gapL, top: 4 })
 
-        List() {
+        List({ scroller: this.sourceSheetScroller }) {
           ForEach(this.sources, (rule: SourceRule) => {
             ListItem() {
               Row() {
@@ -1431,7 +1456,8 @@ struct Index {
             Row() {
               ForEach(this.history.slice(0, 8), (item: ReadProgress) => {
                 this.historyCard(item)
-              }, (item: ReadProgress) => `h_${item.sourceId}_${item.comicId}_${item.chapterIndex}_${item.page}`)
+              // 同一页内位置更新也要重建点击闭包，防止继续阅读携带旧的 pageOffset。
+              }, (item: ReadProgress) => `h_${item.sourceId}_${item.comicId}_${item.chapterIndex}_${item.page}_${item.pageOffset}_${item.updatedAt}`)
             }
             .padding({ left: Theme.gapL })
           }
