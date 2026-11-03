@@ -13,7 +13,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 
 const MAX_BODY_BYTES: number = 8 * 1024 * 1024;
 const DEFAULT_UA: string =
-  'Mozilla/5.0 (Linux; Android 14; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Mozilla/5.0 (Linux; Android 14; HarmonyOS) AppleWeb statKit/537.36 (KHTML, like Gecko) ' +
   'Chrome/131.0.0.0 Mobile Safari/537.36';
 
 export class HttpResponse {
@@ -90,7 +90,6 @@ function decodeBody(data: ArrayBuffer, charset: string): string {
     const decoder = util.TextDecoder.create(charset);
     return decoder.decodeToString(bytes);
   } catch (error) {
-    // 系统不支持该编码时退回 UTF-8，让页面至少能显示部分内容
     try {
       const decoder = util.TextDecoder.create('utf-8');
       return decoder.decodeToString(bytes);
@@ -113,18 +112,10 @@ export function defaultHeaders(referer: string): HttpHeader[] {
 }
 
 export class Http {
-  /**
-   * 发起 GET 请求。
-   * @param fallbackCharset 站点声明的编码，用于响应头缺失 charset 时兜底
-   */
   static async get(url: string, headers: HttpHeader[], fallbackCharset: string): Promise<HttpResponse> {
     return Http.send(url, http.RequestMethod.GET, headers, fallbackCharset);
   }
 
-  /**
-   * 发起 POST 请求。只给「取目录」这类重复调用且无副作用接口用；
-   * 非幂等请求不会重试（见文件头第 1 条规则）。
-   */
   static async post(
     url: string,
     headers: HttpHeader[],
@@ -153,8 +144,6 @@ export class Http {
         headerObject[item.name] = item.value;
       }
     }
-    // POST 带 body 时补 Content-Type：JSON 体用 application/json，其余按表单编码。
-    // 否则部分站（如如漫画）收不到表单参数，返回空结果。
     if (method === http.RequestMethod.POST && body.length > 0) {
       let hasContentType = false;
       for (let i = 0; i < headers.length; i++) {
@@ -198,7 +187,7 @@ export class Http {
         result.byteLength = raw.length;
       }
       result.finalUrl = response.header['location'] === undefined ? url : String(response.header['location']);
-      result.ok = result.status >= 200 && result.status < 400;
+      result.ok = result.status >= 200 && result.status < 300;
       if (!result.ok) {
         result.error = `HTTP ${result.status}`;
       }
@@ -207,7 +196,6 @@ export class Http {
       const message = describeError(error);
       result.error = message;
       result.ok = false;
-      // 幂等请求重试一次：多数是首包握手抖动
       if (isIdempotent(method)) {
         return Http.retryOnce(url, method, headers, fallbackCharset);
       }
@@ -248,7 +236,7 @@ export class Http {
         result.body = raw;
       }
       result.finalUrl = url;
-      result.ok = result.status >= 200 && result.status < 400;
+      result.ok = result.status >= 200 && result.status < 300;
       if (!result.ok) {
         result.error = `HTTP ${result.status}（重试后仍失败）`;
       }
@@ -262,8 +250,16 @@ export class Http {
     }
   }
 
-  /** 下载二进制（图片等） */
+  /** 下载二进制（图片等），失败重试一次，并限制体积 */
   static async getBytes(url: string, headers: HttpHeader[]): Promise<ArrayBuffer | null> {
+    let result = await Http.getBytesOnce(url, headers);
+    if (result === null) {
+      result = await Http.getBytesOnce(url, headers);
+    }
+    return result;
+  }
+
+  private static async getBytesOnce(url: string, headers: HttpHeader[]): Promise<ArrayBuffer | null> {
     const headerObject: Record<string, string> = {};
     for (let i = 0; i < headers.length; i++) {
       headerObject[headers[i].name] = headers[i].value;
@@ -283,6 +279,9 @@ export class Http {
       }
       const raw = response.result;
       if (raw instanceof ArrayBuffer) {
+        if (raw.byteLength > MAX_BODY_BYTES) {
+          return null;
+        }
         return raw;
       }
       return null;
