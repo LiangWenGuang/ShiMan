@@ -52,9 +52,6 @@ export class SourceApi {
     if (!response.ok) {
       return Outcome.failure<ComicBrief[]>(`${rule.name}：${response.error}`);
     }
-    if (rule.search.emptyMarker.length > 0 && response.body.indexOf(rule.search.emptyMarker) >= 0) {
-      return Outcome.failure<ComicBrief[]>(`${rule.name}：没有这本`);
-    }
     try {
       let items: ComicBrief[] = [];
       if (rule.search.responseType === 'json') {
@@ -73,7 +70,11 @@ export class SourceApi {
           rule.search.latest
         );
       }
+      // 先解析再看 emptyMarker：页脚/脚本里残留的文案不应盖掉真实结果
       if (items.length === 0) {
+        if (rule.search.emptyMarker.length > 0 && response.body.indexOf(rule.search.emptyMarker) >= 0) {
+          return Outcome.failure<ComicBrief[]>(`${rule.name}：没有这本`);
+        }
         return Outcome.failure<ComicBrief[]>(`${rule.name}：没有匹配结果`);
       }
       return Outcome.success(items);
@@ -155,7 +156,6 @@ export class SourceApi {
             const base = rule.chapters.json.baseUrl.length > 0
               ? rule.chapters.json.baseUrl : targetJsonUrl;
             if (rule.chapters.mergeHtml) {
-              // 详情页只给最近 N 章、其余在接口里：两段按原顺序拼接去重，最后统一倒序
               const htmlChapters = parseChapters(doc, rule, url, false);
               const jsonChapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId, false);
               detail.chapters = mergeChapters(htmlChapters, jsonChapters);
@@ -168,10 +168,12 @@ export class SourceApi {
             } else {
               detail.chapters = parseChaptersFromJson(jsonResponse.body, rule, base, comicId);
             }
+          } else {
+            // 接口挂了时至少用详情页上已有的目录，避免整本「未解析到章节」
+            detail.chapters = parseChapters(doc, rule, url);
           }
         }
       } else if (rule.chapters.url.length > 0) {
-        // 有些站点把章节目录单独放一页
         const chapterUrl = new UrlVars()
           .set('comicId', comicId)
           .set('id', comicId)
