@@ -1,220 +1,216 @@
 /**
- * 字符串与 URL 工具。
- *
- * 图源规则里大量出现「相对地址 + 模板替换 + 正则后处理」，
- * 这里集中实现，避免各处重复且语义不一致。
+ * 文本与章节号工具。
+ * chapterNumber 优先匹配「第 N 话/回/章」形式，并剥离日期，减少换源对齐偏差。
  */
 
-const SCHEME = new RegExp('^[a-zA-Z][a-zA-Z0-9+.-]*://');
-
-/** 判断是否为绝对 URL */
-export function isAbsoluteUrl(value: string): boolean {
-  if (value.length === 0) {
-    return false;
-  }
-  return SCHEME.test(value) || value.startsWith('//') || value.startsWith('data:');
+export function trim(s: string): string {
+  return s.replace(/^\s+|\s+$/g, '');
 }
 
-/**
- * 把相对地址解析为绝对地址。
- * 手写实现而非 URL 类，因为要处理 `//host/x`、`../x`、`?query`、纯锚点等
- * 站点常见的非规范写法。
- */
-export function resolveUrl(base: string, relative: string): string {
-  const raw = relative.trim();
-  if (raw.length === 0) {
-    return base;
-  }
-  if (SCHEME.test(raw)) {
-    return raw;
-  }
-  if (raw.startsWith('//')) {
-    const protocol = base.startsWith('https://') ? 'https:' : 'http:';
-    return protocol + raw;
-  }
-  if (raw.startsWith('#')) {
-    const hashIndex = base.indexOf('#');
-    return (hashIndex >= 0 ? base.substring(0, hashIndex) : base) + raw;
-  }
-
-  const baseNoHash = base.split('#')[0];
-  const protocolIndex = baseNoHash.indexOf('://');
-  if (protocolIndex < 0) {
-    return raw;
-  }
-  const schemeEnd = protocolIndex + 3;
-  const pathStart = baseNoHash.indexOf('/', schemeEnd);
-  const origin = pathStart < 0 ? baseNoHash : baseNoHash.substring(0, pathStart);
-  let basePath = pathStart < 0 ? '/' : baseNoHash.substring(pathStart);
-
-  if (raw.startsWith('/')) {
-    return origin + raw;
-  }
-  if (raw.startsWith('?')) {
-    const q = basePath.indexOf('?');
-    return origin + (q >= 0 ? basePath.substring(0, q) : basePath) + raw;
-  }
-
-  // 相对路径：以 base 所在目录为基准
-  const queryIndex = basePath.indexOf('?');
-  if (queryIndex >= 0) {
-    basePath = basePath.substring(0, queryIndex);
-  }
-  const lastSlash = basePath.lastIndexOf('/');
-  const dir = lastSlash >= 0 ? basePath.substring(0, lastSlash + 1) : '/';
-  const merged = dir + raw;
-  return origin + normalizePath(merged);
+export function collapseSpace(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
 }
 
-/** 折叠 `.` 与 `..` 段 */
-function normalizePath(input: string): string {
-  const parts = input.split('/');
-  const stack: string[] = [];
-  for (const part of parts) {
-    if (part === '.') {
-      continue;
-    }
-    if (part === '..') {
-      if (stack.length > 1) {
-        stack.pop();
-      }
-      continue;
-    }
-    stack.push(part);
-  }
-  let out = stack.join('/');
-  if (out.length === 0) {
-    out = '/';
-  }
-  if (!out.startsWith('/')) {
-    out = '/' + out;
-  }
-  return out;
+export function stripHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-/** 取出 URL 的 origin（协议 + 主机 + 端口） */
-export function originOf(url: string): string {
-  const index = url.indexOf('://');
-  if (index < 0) {
+export function absUrl(base: string, href: string): string {
+  if (!href || href.length === 0) {
     return '';
   }
-  const schemeEnd = index + 3;
-  const slash = url.indexOf('/', schemeEnd);
-  return slash < 0 ? url : url.substring(0, slash);
-}
-
-/** 模板替换：{kw} {page} {chapterId} {comicId} {url} 等占位符 */
-export function applyTemplate(template: string, key: string, value: string): string {
-  return template.split('{' + key + '}').join(value);
-}
-
-/** HTML 实体反转义（覆盖站点常用的少数实体 + 数字实体） */
-export function decodeEntities(input: string): string {
-  if (input.indexOf('&') < 0) {
-    return input;
+  if (href.startsWith('http://') || href.startsWith('https://')) {
+    return href;
   }
-  let out = input;
-  out = out.split('&nbsp;').join(' ');
-  out = out.split('&amp;').join('&');
-  out = out.split('&lt;').join('<');
-  out = out.split('&gt;').join('>');
-  out = out.split('&quot;').join('"');
-  out = out.split('&#39;').join('\'');
-  out = out.split('&apos;').join('\'');
-  const numeric = new RegExp('&#(x?)([0-9a-fA-F]+);', 'g');
-  out = out.replace(numeric, (match: string, hex: string, digits: string) => {
-    const code = hex === 'x' ? parseInt(digits, 16) : parseInt(digits, 10);
-    if (isNaN(code) || code < 0 || code > 0x10ffff) {
-      return match;
+  if (href.startsWith('//')) {
+    const scheme = base.startsWith('https') ? 'https:' : 'http:';
+    return scheme + href;
+  }
+  try {
+    // 简易绝对化
+    const m = base.match(/^(https?:\/\/[^\/]+)/);
+    const origin = m ? m[1] : base;
+    if (href.startsWith('/')) {
+      return origin + href;
     }
-    return String.fromCharCode(code);
-  });
+    const dir = base.replace(/\/[^\/]*$/, '/');
+    return dir + href;
+  } catch {
+    return href;
+  }
+}
+
+export function firstCaptureOf(text: string, pattern: string): string {
+  if (!pattern || pattern.length === 0) {
+    return '';
+  }
+  try {
+    const re = new RegExp(pattern, 'i');
+    const m = text.match(re);
+    if (m && m.length > 1) {
+      return m[1] ?? '';
+    }
+    if (m && m.length === 1) {
+      return m[0] ?? '';
+    }
+  } catch {
+    // ignore bad pattern
+  }
+  return '';
+}
+
+export function allCapturesOf(text: string, pattern: string): string[] {
+  const out: string[] = [];
+  if (!pattern || pattern.length === 0) {
+    return out;
+  }
+  try {
+    const re = new RegExp(pattern, 'gi');
+    let m: RegExpExecArray | null = re.exec(text);
+    while (m) {
+      if (m.length > 1 && m[1]) {
+        out.push(m[1]);
+      } else if (m[0]) {
+        out.push(m[0]);
+      }
+      m = re.exec(text);
+    }
+  } catch {
+    // ignore
+  }
   return out;
 }
 
-/** 压缩连续空白，用于标题/作者等展示字段 */
-export function compact(input: string): string {
-  return input.replace(new RegExp('\\s+', 'g'), ' ').trim();
-}
-
-/** 截断过长文本，避免详情页描述撑爆布局 */
-export function clampText(input: string, max: number): string {
-  if (input.length <= max) {
-    return input;
-  }
-  return input.substring(0, max) + '…';
-}
-
 /**
- * 从形如 `/manhua432/` 或 `/comic/index/id/531040` 的地址里抽数字 id。
- *
- * 必须只看路径、且取最长的那串数字：
- * ① 域名里可能带数字（m206.com），按整串 URL 找会把所有条目算成同一个 id，
- *    表现是 ForEach 的 key 全部重复 → 三列网格退化成单列；
- * ② 路径里可能有次要数字（/comic/12345/2.html），取最后一串会取到页码。
+ * 从标题中提取章节序号，用于跨源对齐。
+ * 优先「第 N 话/回/章/节/集」，避免把日期或 Vol.2 里的数字当章节号。
  */
-export function extractNumericId(url: string): string {
-  let path = url;
-  const scheme = path.indexOf('://');
-  if (scheme >= 0) {
-    const slash = path.indexOf('/', scheme + 3);
-    path = slash >= 0 ? path.substring(slash) : '/';
-  }
-  const query = path.indexOf('?');
-  if (query >= 0) {
-    path = path.substring(0, query);
-  }
-  const runs = path.match(new RegExp('\\d{2,}', 'g'));
-  if (runs !== null && runs.length > 0) {
-    let best = runs[0];
-    for (let i = 1; i < runs.length; i++) {
-      if (runs[i].length > best.length) {
-        best = runs[i];
-      }
-    }
-    return best;
-  }
-  const fallback = url.match(new RegExp('\\d{2,}'));
-  return fallback === null ? '' : fallback[0];
-}
-
-/**
- * 把 http 升级成 https。
- * 鸿蒙默认拦截明文 HTTP，而不少站点的图片地址仍是 http；
- * 实测这些 CDN 的 https 与 http 返回完全一致，直接升级最省事。
- */
-export function toHttps(url: string): string {
-  if (url.startsWith('http://')) {
-    return 'https://' + url.substring(7);
-  }
-  return url;
-}
-
-/** 章节标题里的数字序号，用于跨源对齐 */
 export function chapterNumber(title: string): number {
-  const arabic = title.match(new RegExp('(\\d+(?:\\.\\d+)?)'));
-  if (arabic !== null) {
-    const parsed = parseFloat(arabic[1]);
-    if (!isNaN(parsed)) {
-      return parsed;
+  // 优先「第 N 话/回/章/节/集」，避免把日期或 Vol.2 里的数字当章节号
+  const labeled = title.match(new RegExp('第\\s*(\\d+(?:\\.\\d+)?)\\s*[话回章节集]'));
+  if (labeled && labeled[1]) {
+    const n = parseFloat(labeled[1]);
+    if (!isNaN(n)) {
+      return n;
+    }
+  }
+  // 去掉日期片段再取第一个数字，减少「12月3日 第5话」对齐到 12 的情况
+  const cleaned = title
+    .replace(/\d{4}[-年/]\d{1,2}[-月/]\d{1,2}/g, ' ')
+    .replace(/\d{1,2}月\d{1,2}日/g, ' ')
+    .replace(/\d{4}-\d{2}-\d{2}/g, ' ');
+  const m = cleaned.match(/(\d+(?:\.\d+)?)/);
+  if (m && m[1]) {
+    const n = parseFloat(m[1]);
+    if (!isNaN(n)) {
+      return n;
     }
   }
   return -1;
 }
 
-/**
- * 章节更新时间压缩成一行短文本，方便塞在章节格子/目录行里。
- * `2026-11-02 01:53:30` → `11-02`；`2023-12-06` → `12-06`；
- * 认不出来的原样返回（最多 10 字），不至于显示成空白。
- */
-export function shortTime(raw: string): string {
-  const full = raw.match(new RegExp('(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})'));
-  if (full !== null) {
-    return `${full[2]}-${full[3]}`;
+export function normalizeTitle(title: string): string {
+  return collapseSpace(
+    title
+      .replace(/[【\[\(（].*?[】\]\)）]/g, '')
+      .replace(/第\s*\d+\s*[话回章节集]/g, '')
+      .toLowerCase()
+  );
+}
+
+export function similarity(a: string, b: string): number {
+  const x = normalizeTitle(a);
+  const y = normalizeTitle(b);
+  if (x.length === 0 || y.length === 0) {
+    return 0;
   }
-  const short = raw.match(new RegExp('(\\d{1,2})[-/](\\d{1,2})'));
-  if (short !== null) {
-    return `${short[1]}-${short[2]}`;
+  if (x === y) {
+    return 1;
   }
-  return raw.length > 10 ? raw.substring(0, 10) : raw;
+  if (x.includes(y) || y.includes(x)) {
+    return 0.85;
+  }
+  // 简单字符重叠
+  const setA = new Set(x.split(''));
+  let hit = 0;
+  for (const c of y) {
+    if (setA.has(c)) {
+      hit++;
+    }
+  }
+  return hit / Math.max(x.length, y.length);
+}
+
+export function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+export function safeJsonParse(text: string): Object | null {
+  try {
+    return JSON.parse(text) as Object;
+  } catch {
+    return null;
+  }
+}
+
+export function pickString(obj: Object | null, path: string): string {
+  if (obj === null || path.length === 0) {
+    return '';
+  }
+  const parts = path.split('.');
+  let cur: Object | null = obj;
+  for (const p of parts) {
+    if (cur === null || typeof cur !== 'object') {
+      return '';
+    }
+    const rec = cur as Record<string, Object>;
+    if (!(p in rec)) {
+      return '';
+    }
+    cur = rec[p] as Object;
+  }
+  if (cur === null || cur === undefined) {
+    return '';
+  }
+  return String(cur);
+}
+
+export function pickArray(obj: Object | null, path: string): Object[] {
+  if (obj === null || path.length === 0) {
+    return [];
+  }
+  const parts = path.split('.');
+  let cur: Object | null = obj;
+  for (const p of parts) {
+    if (cur === null || typeof cur !== 'object') {
+      return [];
+    }
+    const rec = cur as Record<string, Object>;
+    if (!(p in rec)) {
+      return [];
+    }
+    cur = rec[p] as Object;
+  }
+  if (Array.isArray(cur)) {
+    return cur as Object[];
+  }
+  return [];
 }

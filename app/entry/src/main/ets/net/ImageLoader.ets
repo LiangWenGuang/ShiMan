@@ -1,74 +1,73 @@
-/**
- * 带 Referer 的图片加载器。
- *
- * 为什么需要：部分图源 CDN 开了防盗链（实测松子漫画不带 Referer 直接 403），
- * 而 ArkUI 的 Image(url) 不会带 Referer。只能自己 DOWN 字节流再解成 PixelMap。
- *
- * 内存策略：不做全局 PixelMap 缓存 —— 组件各自持有、卸载时释放，
- * 避免「缓存里的图被 release 了但还在显示」这类黑屏问题。
- * 字节层做了小容量 LRU，滚动回来不用重新下载。
+/*
+ * 图片加载与 LRU 字节缓存。
+ * 只在 PixelMap 解码成功后才写入缓存，避免把损坏响应「毒化」后续请求。
  */
-
 import { image } from '@kit.ImageKit';
-import { Http, HttpHeader, defaultHeaders } from './Http';
+import { Http, HttpHeader } from './Http';
 
-const MAX_BYTES_ENTRIES: number = 24;
+class CacheEntry {
+  url: string = '';
+  bytes: ArrayBuffer = new ArrayBuffer(0);
+  lastAccess: number = 0;
+}
 
 export class ImageLoader {
-  private static bytesCache: Map<string, ArrayBuffer> = new Map<string, ArrayBuffer>();
-  private static order: string[] = [];
+  private static readonly MAX_ENTRIES = 48;
+  private static bytesCache: Map<string, CacheEntry> = new Map();
 
-  private static remember(key: string, data: ArrayBuffer): void {
-    if (ImageLoader.bytesCache.has(key)) {
+  static clearCache(): void {
+    ImageLoader.bytesCache.clear();
+  }
+
+  private static touch(url: string, bytes: ArrayBuffer): void {
+    const now = Date.now();
+    if (ImageLoader.bytesCache.has(url)) {
+      const e = ImageLoader.bytesCache.get(url)!;
+      e.bytes = bytes;
+      e.lastAccess = now;
       return;
     }
-    ImageLoader.bytesCache.set(key, data);
-    ImageLoader.order.push(key);
-    while (ImageLoader.order.length > MAX_BYTES_ENTRIES) {
-      const oldest = ImageLoader.order.shift();
-      if (oldest !== undefined) {
+    if (ImageLoader.bytesCache.size >= ImageLoader.MAX_ENTRIES) {
+      let oldest = '';
+      let oldestT = Number.MAX_VALUE;
+      ImageLoader.bytesCache.forEach((v, k) => {
+        if (v.lastAccess < oldestT) {
+          oldestT = v.lastAccess;
+          oldest = k;
+        }
+      });
+      if (oldest.length > 0) {
         ImageLoader.bytesCache.delete(oldest);
       }
     }
+    const e = new CacheEntry();
+    e.url = url;
+    e.bytes = bytes;
+    e.lastAccess = now;
+    ImageLoader.bytesCache.set(url, e);
   }
 
-  /** 下载并解码为 PixelMap；失败返回 null */
-  static async load(url: string, referer: string): Promise<image.PixelMap | null> {
-    if (url.length === 0) {
-      return null;
-    }
+  static async loadPixelMap(url: string, headers: HttpHeader[]): Promise<image.PixelMap | null> {
     try {
-      let buffer = ImageLoader.bytesCache.get(url);
-      if (buffer === undefined) {
-        const headers: HttpHeader[] = defaultHeaders(referer);
-        headers.push(new HttpHeader('Accept', 'image/webp,image/jpeg,image/png,image/*,*/*'));
-        let data = await Http.getBytes(url, headers);
-        // 两种 CDN 策略是相反的：
-        //   松子漫画 —— 不带 Referer 直接 403，必须带；
-        //   云北漫画用的 oss.mkzcdn.com —— 带外站 Referer 反而 403，不带才给。
-        // 所以带 Referer 失败时再用「不带 Referer」重试一次，比给每个源加开关省事。
-        if (data === null && referer.length > 0) {
-          const plain: HttpHeader[] = defaultHeaders('');
-          plain.push(new HttpHeader('Accept', 'image/webp,image/jpeg,image/png,image/*,*/*'));
-          data = await Http.getBytes(url, plain);
-        }
-        if (data === null) {
-          return null;
-        }
-        buffer = data;
+      let bytes: ArrayBuffer | null = null;
+      const cached = ImageLoader.bytesCache.get(url);
+      if (cached !== undefined) {
+        cached.lastAccess = Date.now();
+        bytes = cached.bytes;
+      } else {
+        bytes = await Http.getBytes(url, headers);
       }
-      const source = image.createImageSource(buffer);
+      if (bytes === null || bytes.byteLength === 0) {
+        return null;
+      }
+      const source = image.createImageSource(bytes);
       const pixelMap = await source.createPixelMap();
-      source.release();
-      // 解码成功后再进缓存，避免把错误页 HTML 当图片锁死 LRU
-      ImageLoader.remember(url, buffer);
+      // 仅在解码成功后缓存，防止把 404/HTML/截断响应写进 LRU
+      ImageLoader.touch(url, bytes);
       return pixelMap;
-    } catch (error) {
+    } catch (e) {
+      // 解码失败时丢掉可能已污染的缓存条目
       ImageLoader.bytesCache.delete(url);
-      const orderIndex = ImageLoader.order.indexOf(url);
-      if (orderIndex >= 0) {
-        ImageLoader.order.splice(orderIndex, 1);
-      }
       return null;
     }
   }
