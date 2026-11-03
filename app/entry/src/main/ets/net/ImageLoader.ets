@@ -56,13 +56,19 @@ export class ImageLoader {
           return null;
         }
         buffer = data;
-        ImageLoader.remember(url, buffer);
       }
       const source = image.createImageSource(buffer);
       const pixelMap = await source.createPixelMap();
       source.release();
+      // 解码成功后再进缓存，避免把错误页 HTML 当图片锁死 LRU
+      ImageLoader.remember(url, buffer);
       return pixelMap;
     } catch (error) {
+      ImageLoader.bytesCache.delete(url);
+      const orderIndex = ImageLoader.order.indexOf(url);
+      if (orderIndex >= 0) {
+        ImageLoader.order.splice(orderIndex, 1);
+      }
       return null;
     }
   }
