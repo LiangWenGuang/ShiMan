@@ -52,7 +52,7 @@
     "type": "sequence",
     "url": "{chapterUrl}",
     "pattern": "var pasd = \"([^\"]+)\"",
-    "countPattern": "var num =eval\\(\"(\\d+)\"\\)",
+    "countPattern": "var\\s*num\\s*=\\s*eval\\(\\s*\\\"(\\d+)\\\"\\s*\\)",
     "template": "{base}{i}.webp",
     "maxCount": 200
   },
