@@ -311,6 +311,7 @@ export function parseDetailFields(
 export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: string, applyReverse: boolean = true): ChapterBrief[] {
   const items = queryAll(doc, rule.chapters.listSelector);
   const chapters: ChapterBrief[] = [];
+  const seenUrls = new Set<string>();
   for (let i = 0; i < items.length; i++) {
     const node = items[i];
     const title = evalField(node, rule.chapters.title);
@@ -319,6 +320,11 @@ export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: stri
       continue;
     }
     const url = resolveUrl(pageUrl, link);
+    // 详情页「开始阅读」按钮常与目录首章重复，按实际章节 URL 去重。
+    if (seenUrls.has(url)) {
+      continue;
+    }
+    seenUrls.add(url);
     let id = rule.chapters.id.length > 0 ? evalField(node, rule.chapters.id) : '';
     if (id.length === 0) {
       id = extractNumericId(url);
@@ -583,14 +589,32 @@ export function parseImagesFromRegex(html: string, rule: SourceRule, pageUrl: st
   } catch (error) {
     return images;
   }
+  const seen = new Set<string>();
+  const limit = rule.images.maxCount > 0 ? rule.images.maxCount : 300;
+  let count = 0;
   let m: RegExpExecArray | null = regex.exec(html);
-  while (m !== null) {
+  while (m !== null && count < 5000 && images.length < limit) {
     const raw = m.length > 1 ? m[1] : m[0];
     if (raw !== undefined && raw.length > 0) {
-      const image = new PageImage();
-      image.url = toHttps(resolveUrl(pageUrl, raw));
-      image.referer = pageUrl;
-      images.push(image);
+      // React/Next 服务端 JSON 常把签名 URL 的 & 序列化成 \\u0026。
+      // 正文 URL 必须还原并去重，否则同一图片被渲染/序列化两次就会重复展示。
+      const normalized = raw.replace(/\\u0026/gi, '&')
+        .replace(/&amp;/gi, '&')
+        .replace(/\\+$/g, '');
+      const url = toHttps(resolveUrl(pageUrl, normalized));
+      if (url.length > 0 && !seen.has(url)) {
+        seen.add(url);
+        const image = new PageImage();
+        image.url = url;
+        image.referer = pageUrl;
+        images.push(image);
+      }
+    }
+    count++;
+    // 零宽全局匹配必须推进游标，避免坏图源正则把 UI 卡死。
+    if (m[0].length === 0) {
+      if (regex.lastIndex >= html.length) break;
+      regex.lastIndex++;
     }
     m = regex.exec(html);
   }
