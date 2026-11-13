@@ -83,6 +83,7 @@ export const preferences = {
   })
 };
 export function persistedProgress() { return values.get('progress') ?? ''; }
+export function persistedChapterOrderFixes() { return values.get('chapter_order_fixes') ?? ''; }
 export function maxConcurrent() { return maximum; }
 `;
 try {
@@ -127,6 +128,18 @@ try {
   const serialized = pref.persistedProgress();
   check('阅读进度写入串行', pref.maxConcurrent() === 1);
   check('最新章节进度最终落盘', serialized.split('\t')[5] === '2');
+
+  library.setChapterOrderFlipped('source-A', 'manga-1', true);
+  library.setChapterOrderFlipped('source-A', 'manga-2', true);
+  library.setChapterOrderFlipped('source-A', 'manga-1', false);
+  check('章节方向修正仅针对单本作品',
+    !library.isChapterOrderFlipped('source-A', 'manga-1') &&
+    library.isChapterOrderFlipped('source-A', 'manga-2') &&
+    !library.isChapterOrderFlipped('source-B', 'manga-2'));
+  await new Promise(resolve => setTimeout(resolve, 120));
+  const fixes = pref.persistedChapterOrderFixes();
+  check('快速切换后的阅读方向偏好可靠落盘',
+    fixes.includes('manga-2') && !fixes.includes('manga-1'));
 
   console.log('\n===== Runtime regression: PASS ' + passed + ' / FAIL ' + failed + ' =====');
   process.exitCode = failed > 0 ? 1 : 0;
