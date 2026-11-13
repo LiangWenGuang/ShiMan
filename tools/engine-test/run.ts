@@ -46,6 +46,8 @@ try {
   check('当前源码 HTML/CSS 解析', nodes.length === 1, `nodes=${nodes.length}`);
   check('当前源码实体解码', textUtil.decodeEntities('&lt;a&gt;&#128512;') === '<a>😀', 'ok');
   check('当前源码 URL 解析', textUtil.resolveUrl('https://a.test/x/detail.html', '../img/1.jpg') === 'https://a.test/img/1.jpg', 'ok');
+  check('零宽正则不会死循环', textUtil.allCapturesOf('abc', '(?=b)').length === 0, 'ok');
+  check('正常正则捕获保持兼容', textUtil.allCapturesOf('a1 b2', '([a-z])\\d').join(',') === 'a,b', 'ok');
   check('当前源码 JSON 解析', json.parseJson('{"data":[1,2]}').get('data').items.length === 2, 'ok');
   const rule = new rules.SourceRule(); rule.id = 'fixture'; rule.name = '离线样例'; rule.baseUrl = 'https://a.test/';
   rule.search.listSelector = '.comic'; rule.search.id = 'a@attr:data-id||a@attr:href';
