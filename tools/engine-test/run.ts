@@ -29,6 +29,7 @@ try {
   mirror('parse/Json.ets', 'Json.ts'); mirror('util/Text.ets', 'Text.ts');
   mirror('model/Models.ets', 'Models.ts'); mirror('rule/Rules.ets', 'Rules.ts');
   mirror('rule/Engine.ets', 'Engine.ts');
+  mirror('util/ChapterOrder.ets', 'ChapterOrder.ts');
   fs.copyFileSync(path.join(here, 'kitshim.ts'), path.join(tempRoot, 'kitshim.ts'));
   const html = await import(pathToFileURL(path.join(tempRoot, 'Html.ts')).href);
   const selector = await import(pathToFileURL(path.join(tempRoot, 'Selector.ts')).href);
@@ -41,6 +42,43 @@ try {
     if (ok) { pass++; console.log(`  PASS  ${name}  ${detail}`); }
     else { fail++; console.log(`  FAIL  ${name}  ${detail}`); }
   };
+  const order = await import(pathToFileURL(path.join(tempRoot, 'ChapterOrder.ts')).href);
+  const model = await import(pathToFileURL(path.join(tempRoot, 'Models.ts')).href);
+  const makeChapters = (titles: string[]): any[] => titles.map((title: string, index: number): any => {
+    const item = new model.ChapterBrief();
+    item.chapterId = 'chapter_' + index;
+    item.title = title;
+    item.url = 'https://example.test/' + index;
+    item.index = index;
+    return item;
+  });
+  const labels = makeChapters(['第1话', '第2话', '番外：纪念篇', '第3话', '第2话（重制）', '第4话']);
+  const asc = order.normalizeChapterOrder(labels, true);
+  check('夹杂番外/重复章仍识别正序', asc[0].title === '第1话' &&
+    asc[asc.length - 1].title === '第4话', asc.map((x: any) => x.title).join('|'));
+  const descInput = makeChapters(['第5回', '第4回', '特别篇', '第3回', '第2回', '第1回']);
+  const chronological = order.normalizeChapterOrder(descInput, false);
+  check('目录倒序可覆盖错误配置', chronological[0].title === '第1回' &&
+    chronological[chronological.length - 1].title === '第5回', chronological.map((x: any) => x.title).join('|'));
+  const chinese = order.normalizeChapterOrder(makeChapters(['第十二话', '第十一话', '第十话']), false);
+  check('中文数字章节识别', chinese[0].title === '第十话' && chinese[2].title === '第十二话', 'ok');
+  const japanese = order.normalizeChapterOrder(makeChapters(['第３話', '第２話', '第１話']), false);
+  check('全角日文章节识别', japanese[0].title === '第１話', 'ok');
+  const extras = order.normalizeChapterOrder(makeChapters(['2026-11-14 上架公告', '番外篇', '完结感言']), true);
+  check('没有可信编号时按图源配置兜底', extras[0].title === '完结感言', 'ok');
+  const ambiguous = order.detectChapterDirection(makeChapters(['第1话', '第2话', '第1话', '第2话']));
+  check('反复重置的目录不盲猜方向', ambiguous === null, String(ambiguous));
+  const repaired = order.flipChapterOrder(asc);
+  const anchor = asc[2];
+  const remapped = order.findChapterIndex(repaired, anchor.chapterId, anchor.title, 2);
+  check('手动反向后旧章节 ID 仍能续读', repaired[remapped].chapterId === anchor.chapterId &&
+    repaired.every((x: any, i: number) => x.index === i), String(remapped));
+  const reverseDisplay = order.chaptersForDisplay(asc, true);
+  check('目录展示反向不影响阅读索引', asc[0].index === 0 &&
+    reverseDisplay[0].chapterId === asc[asc.length - 1].chapterId, 'ok');
+  check('日期和卷号不会误认为章节序号',
+    order.chapterOrderNumber('2026-11-14 最新公告') === -1 &&
+    order.chapterOrderNumber('Vol.2 纪念画') === -1, 'ok');
   const doc = html.parseHtml('<div class="comic"><a href="/comic/12345"><img src="/cover.jpg">测试漫画</a></div>');
   const nodes = selector.queryAll(doc, '.comic a');
   check('当前源码 HTML/CSS 解析', nodes.length === 1, `nodes=${nodes.length}`);

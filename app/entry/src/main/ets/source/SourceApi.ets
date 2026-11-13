@@ -14,7 +14,8 @@ import {
 import { parseHtml, HtmlDocument } from '../parse/Html';
 import { Outcome, ComicBrief, ComicDetail, ChapterBrief, PageImage } from '../model/Models';
 import { resolveUrl } from '../util/Text';
-import { normalizeChapterOrder } from '../util/ChapterOrder';
+import { normalizeChapterOrder, flipChapterOrder } from '../util/ChapterOrder';
+import { Library } from '../store/Library';
 import { SourceHealth } from './SourceHealth';
 
 /** 图片请求结果：普通源的 images 直接可用；web 源需要页面层做一次无头提取 */
@@ -203,6 +204,11 @@ export class SourceApi {
 
       // 所有入口统一应用图源方向，保证 Reader 使用的 chapterIndex 是阅读顺序索引。
       detail.chapters = normalizeChapterOrder(detail.chapters, rule.chapters.reverse);
+      // 自动判断无把握时，用户可以只针对当前漫画纠正阅读方向。
+      // 该修正发生在目录展示翻转之前，确保上一章/下一章沿真正阅读顺序移动。
+      if (Library.get().isChapterOrderFlipped(rule.id, comicId)) {
+        detail.chapters = flipChapterOrder(detail.chapters);
+      }
 
       if (detail.chapters.length === 0) {
         SourceHealth.record(rule.id, false, '未解析到章节');

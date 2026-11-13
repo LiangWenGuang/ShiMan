@@ -15,6 +15,7 @@ const KEY_SHELF = 'shelf';
 const KEY_PROGRESS = 'progress';
 const KEY_FAVORITE = 'favorite';
 const KEY_CHAPTER_DESCENDING = 'chapter_descending';
+const KEY_CHAPTER_ORDER_FIXES = 'chapter_order_fixes';
 const KEY_CHAPTER_COLUMNS = 'chapter_columns';
 const KEY_SEARCH_HISTORY = 'search_history';
 
@@ -42,6 +43,10 @@ export class Library {
   private progressDirty: boolean = false;
   /** 详情页与阅读器共用的目录展示顺序，不影响章节原始索引 */
   private chapterDescending: boolean = false;
+  /** 个别漫画源目录方向与配置相反时，只反转该漫画，不影响同源其他作品。 */
+  private chapterOrderFixes: Set<string> = new Set<string>();
+  private chapterFixDirty: boolean = false;
+  private chapterFixPersisting: boolean = false;
   /** 章节目录每行几列（1 或 2），详情页可切换并持久化 */
   private chapterColumnsValue: number = 2;
   /** 搜索历史（新在前，最多存 20 条，展示取前 10） */
@@ -80,6 +85,19 @@ export class Library {
       if (typeof chapterOrderRaw === 'boolean') {
         this.chapterDescending = chapterOrderRaw;
       }
+      const chapterFixRaw = await this.store.get(KEY_CHAPTER_ORDER_FIXES, '');
+      if (typeof chapterFixRaw === 'string' && chapterFixRaw.length > 0) {
+        const lines = chapterFixRaw.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          const parts = lines[i].split('\t');
+          if (parts.length !== 2) continue;
+          const sourceId = dec(parts[0]);
+          const comicId = dec(parts[1]);
+          if (sourceId.length > 0 && comicId.length > 0) {
+            this.chapterOrderFixes.add(this.keyOf(sourceId, comicId));
+          }
+        }
+      }
       const chapterColumnsRaw = await this.store.get(KEY_CHAPTER_COLUMNS, 2);
       if (typeof chapterColumnsRaw === 'number') {
         this.chapterColumnsValue = chapterColumnsRaw === 1 ? 1 : 2;
@@ -113,6 +131,53 @@ export class Library {
     }).catch(() => {
       // 内存中的偏好仍然生效，下次启动沿用上次成功写入的值
     });
+  }
+
+  /** 是否强制纠正这本漫画的阅读方向（与全局目录展示正序/倒序无关）。 */
+  isChapterOrderFlipped(sourceId: string, comicId: string): boolean {
+    return this.chapterOrderFixes.has(this.keyOf(sourceId, comicId));
+  }
+
+  /** 即时生效，并合并连续点击产生的写盘请求。 */
+  setChapterOrderFlipped(sourceId: string, comicId: string, flipped: boolean): void {
+    if (sourceId.length === 0 || comicId.length === 0) return;
+    const key = this.keyOf(sourceId, comicId);
+    if (flipped) this.chapterOrderFixes.add(key);
+    else this.chapterOrderFixes.delete(key);
+    this.persistChapterOrderFixes();
+  }
+
+  private persistChapterOrderFixes(): void {
+    if (this.store === null) return;
+    this.chapterFixDirty = true;
+    if (this.chapterFixPersisting) return;
+    this.chapterFixPersisting = true;
+    this.flushChapterOrderFixes();
+  }
+
+  private async flushChapterOrderFixes(): Promise<void> {
+    try {
+      while (this.chapterFixDirty) {
+        this.chapterFixDirty = false;
+        const store = this.store;
+        if (store === null) return;
+        const lines: string[] = [];
+        this.chapterOrderFixes.forEach((key: string): void => {
+          const delimiter = key.indexOf('|');
+          if (delimiter >= 0) {
+            lines.push(enc(key.substring(0, delimiter)) + '\t' + enc(key.substring(delimiter + 1)));
+          }
+        });
+        try {
+          await store.put(KEY_CHAPTER_ORDER_FIXES, lines.join('\n'));
+          await store.flush();
+        } catch (error) {
+          // 本次偏好存储失败不阻塞阅读和后续重试。
+        }
+      }
+    } finally {
+      this.chapterFixPersisting = false;
+    }
   }
 
   chapterColumns(): number {
