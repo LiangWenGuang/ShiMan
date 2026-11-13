@@ -57,6 +57,8 @@ struct SourceSwitchPage {
   @State message: string = '正在检索其他图源…';
   @State progressText: string = '';
   private params: SwitchParams = new SwitchParams();
+  /** 失效会话不会覆盖切走之后的页面状态。 */
+  private collectToken: number = 0;
 
   aboutToAppear(): void {
     const raw = router.getParams() as SwitchParams;
@@ -64,6 +66,10 @@ struct SourceSwitchPage {
       this.params = raw;
     }
     this.collect();
+  }
+
+  onPageHide(): void {
+    this.collectToken++;
   }
 
   private async searchOne(rule: SourceRule): Promise<SearchHit | null> {
@@ -127,41 +133,77 @@ struct SourceSwitchPage {
   }
 
   private async collect(): Promise<void> {
+    const token = ++this.collectToken;
+    this.loading = true;
+    this.candidates = [];
     const registry = SourceRegistry.get();
     const all = registry.enabled();
     const found: SwitchCandidate[] = [];
 
-    // 阶段一：并行搜索所有其他源（不同域名互不影响，比串行快一个数量级）
+    // 阶段一：最多 3 个并发请求，避免开启大量图源时打满网络连接。
     const targetRules: SourceRule[] = [];
     for (let i = 0; i < all.length; i++) {
-      if (all[i].id === this.params.sourceId) {
-        continue;
+      if (all[i].id !== this.params.sourceId) {
+        targetRules.push(all[i]);
       }
-      targetRules.push(all[i]);
     }
-    this.progressText = `正在并行检索 ${targetRules.length} 个源…`;
-    const searchPromises: Promise<SearchHit | null>[] = [];
+    this.progressText = `正在检索 ${targetRules.length} 个源…`;
+    const searchOutcomes: (SearchHit | null)[] = [];
     for (let i = 0; i < targetRules.length; i++) {
-      searchPromises.push(this.searchOne(targetRules[i]));
+      searchOutcomes.push(null);
     }
-    const searchOutcomes = await Promise.all(searchPromises);
+    let searchNext = 0;
+    const searchWorker = async (): Promise<void> => {
+      while (token === this.collectToken && searchNext < targetRules.length) {
+        const index = searchNext++;
+        try {
+          searchOutcomes[index] = await this.searchOne(targetRules[index]);
+        } catch (error) {
+          // 单个图源抛出异常时继续检查剩余图源。
+          searchOutcomes[index] = null;
+        }
+      }
+    };
+    const searchWorkers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(3, targetRules.length); i++) {
+      searchWorkers.push(searchWorker());
+    }
+    await Promise.all(searchWorkers);
+    if (token !== this.collectToken) return;
 
-    // 阶段二：并行拉取各候选的详情（拿到章节数并对齐章节）
-    const detailPromises: Promise<SwitchCandidate>[] = [];
+    // 阶段二：最多 3 个并发详情请求，防止同名候选过多时资源耗尽。
+    const detailRules: SourceRule[] = [];
+    const detailBriefs: ComicBrief[] = [];
+    const detailScores: number[] = [];
     for (let i = 0; i < searchOutcomes.length; i++) {
       const hit = searchOutcomes[i];
-      if (hit === null) {
-        continue;
-      }
+      if (hit === null) continue;
       for (let k = 0; k < hit.hits.length; k++) {
-        detailPromises.push(this.detailOne(hit.rule, hit.hits[k], hit.scores[k]));
+        detailRules.push(hit.rule);
+        detailBriefs.push(hit.hits[k]);
+        detailScores.push(hit.scores[k]);
       }
     }
-    this.progressText = `正在比对 ${detailPromises.length} 个候选…`;
-    const candidates = await Promise.all(detailPromises);
-    for (let i = 0; i < candidates.length; i++) {
-      found.push(candidates[i]);
+    this.progressText = `正在比对 ${detailRules.length} 个候选…`;
+    let detailNext = 0;
+    const detailWorker = async (): Promise<void> => {
+      while (token === this.collectToken && detailNext < detailRules.length) {
+        const index = detailNext++;
+        try {
+          const candidate = await this.detailOne(detailRules[index], detailBriefs[index], detailScores[index]);
+          if (token !== this.collectToken) return;
+          found.push(candidate);
+        } catch (error) {
+          // 单本详情失败不应终止整批换源搜索。
+        }
+      }
+    };
+    const detailWorkers: Promise<void>[] = [];
+    for (let i = 0; i < Math.min(3, detailRules.length); i++) {
+      detailWorkers.push(detailWorker());
     }
+    await Promise.all(detailWorkers);
+    if (token !== this.collectToken) return;
 
     // 按相似度降序
     for (let a = 1; a < found.length; a++) {
