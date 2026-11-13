@@ -13,7 +13,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 
 const MAX_BODY_BYTES: number = 8 * 1024 * 1024;
 const DEFAULT_UA: string =
-  'Mozilla/5.0 (Linux; Android 14; HarmonyOS) AppleWeb statKit/537.36 (KHTML, like Gecko) ' +
+  'Mozilla/5.0 (Linux; Android 14; HarmonyOS) AppleWebKit/537.36 (KHTML, like Gecko) ' +
   'Chrome/131.0.0.0 Mobile Safari/537.36';
 
 export class HttpResponse {
