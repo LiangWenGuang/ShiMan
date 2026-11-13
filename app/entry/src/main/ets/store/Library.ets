@@ -106,9 +106,9 @@ export class Library {
     if (this.store === null) {
       return;
     }
-    this.store.put(KEY_CHAPTER_DESCENDING, descending).then(() => {
+    this.store.put(KEY_CHAPTER_DESCENDING, descending).then(async () => {
       if (this.store !== null) {
-        this.store.flush();
+        await this.store.flush();
       }
     }).catch(() => {
       // 内存中的偏好仍然生效，下次启动沿用上次成功写入的值
@@ -128,9 +128,9 @@ export class Library {
     if (this.store === null) {
       return;
     }
-    this.store.put(KEY_CHAPTER_COLUMNS, next).then(() => {
+    this.store.put(KEY_CHAPTER_COLUMNS, next).then(async () => {
       if (this.store !== null) {
-        this.store.flush();
+        await this.store.flush();
       }
     }).catch(() => {
       // 内存偏好仍生效
@@ -503,9 +503,9 @@ export class Library {
     for (let i = 0; i < this.searchHistoryItems.length; i++) {
       lines.push(enc(this.searchHistoryItems[i]));
     }
-    this.store.put(KEY_SEARCH_HISTORY, lines.join('\n')).then(() => {
+    this.store.put(KEY_SEARCH_HISTORY, lines.join('\n')).then(async () => {
       if (this.store !== null) {
-        this.store.flush();
+        await this.store.flush();
       }
     }).catch(() => {
       // 忽略写入失败
