@@ -114,3 +114,19 @@ await targeted('walker-structure-reader','https://comic-walker.com/detail/KC_003
  const k=h.indexOf('__NEXT_DATA__'); const pics=(h.match(/https:\/\/cdn\.comic-walker\.com\/integration\/cdpf\/resources\/[a-zA-Z0-9\/._-]+\.(?:jpe?g|webp)/g)||[]);
  return {nextSnippet:h.slice(k,k+700),imageCount:pics.length,firstPictures:[...new Set(pics)].slice(0,4)};
 });
+
+await targeted('ganma-reader-image-categories','https://ganma.jp/web/reader/regacy/4507740e-8458-11e4-92eb-0a53fe82f17f/0',(h)=>{
+ const clean=h.replace(/\\u0026/g,'&').replace(/\\"/g,'"');
+ const matches=[...clean.matchAll(/https:\/\/d1bzi54d5ruxfk\.cloudfront\.net\/([^\/?" ]+)\/([^" ]{0,130})/g)];
+ const count={};for(const m of matches){count[m[1]]=(count[m[1]]??0)+1;}
+ const relevant=matches.filter(m=>/story|page|manga|image|original|raw/i.test(m[1])).slice(0,8).map(m=>({kind:m[1],path:m[2].slice(0,115)}));
+ const around=['"page":1','"page":2','"page":3','"page":37','"imageUrls"','"pages"','"images"','"storyImage"'];
+ const contexts={};for(const k of around){const at=clean.indexOf(k);if(at>=0)contexts[k]=clean.slice(Math.max(0,at-130),at+300);}
+ return {count,relevant,contexts,bytes:h.length};
+});
+await targeted('ganma-reader-image-categories-b','https://ganma.jp/web/reader/kaidanloop/936237d0-d2b2-11e9-b339-5e26199913ba/0',(h)=>{
+ const clean=h.replace(/\\u0026/g,'&').replace(/\\"/g,'"');
+ const matches=[...clean.matchAll(/https:\/\/d1bzi54d5ruxfk\.cloudfront\.net\/([^\/?" ]+)\/([^" ]{0,130})/g)];
+ const count={};for(const m of matches){count[m[1]]=(count[m[1]]??0)+1;}
+ return {count,relevant:matches.filter(m=>/story|page|manga|image/i.test(m[1])).slice(0,8).map(m=>({kind:m[1],path:m[2].slice(0,100)})),bytes:h.length};
+});
