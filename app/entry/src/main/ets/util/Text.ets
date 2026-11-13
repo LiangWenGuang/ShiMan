@@ -127,11 +127,18 @@ export function allCapturesOf(text: string, pattern: string): string[] {
   try {
     const re = new RegExp(pattern, 'gi');
     let m: RegExpExecArray | null = re.exec(text);
-    while (m) {
+    // 图源正则可能匹配空字符串。全局 RegExp.exec 在零宽匹配时不会自动前进。
+    let steps = 0;
+    while (m !== null && steps < 10000) {
       if (m.length > 1 && m[1]) {
         out.push(m[1]);
       } else if (m[0]) {
         out.push(m[0]);
+      }
+      steps++;
+      if (m[0].length === 0) {
+        if (re.lastIndex >= text.length) break;
+        re.lastIndex++;
       }
       m = re.exec(text);
     }
