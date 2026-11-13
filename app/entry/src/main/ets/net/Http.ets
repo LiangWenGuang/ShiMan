@@ -29,6 +29,7 @@ export class HttpResponse {
 /** 图片请求结果，保留失败阶段供图片占位提示使用。 */
 export class BytesResponse {
   bytes: ArrayBuffer | null = null;
+  status: number = 0;
   error: string = '';
 }
 
@@ -189,6 +190,10 @@ export class Http {
         const charset = detectCharset(result.contentType, fallbackCharset);
         result.body = decodeBody(raw, charset);
       } else if (typeof raw === 'string') {
+        if (raw.length > MAX_BODY_BYTES) {
+          result.error = `响应体过大（${raw.length} 字符），已丢弃`;
+          return result;
+        }
         result.body = raw;
         result.byteLength = raw.length;
       }
@@ -236,12 +241,21 @@ export class Http {
       result.contentType = String(response.header['content-type'] === undefined ? '' : response.header['content-type']);
       const raw = response.result;
       if (raw instanceof ArrayBuffer) {
+        if (raw.byteLength > MAX_BODY_BYTES) {
+          result.error = `响应体过大（${raw.byteLength} 字节），已丢弃`;
+          return result;
+        }
         result.byteLength = raw.byteLength;
         result.body = decodeBody(raw, detectCharset(result.contentType, fallbackCharset));
       } else if (typeof raw === 'string') {
+        if (raw.length > MAX_BODY_BYTES) {
+          result.error = `响应体过大（${raw.length} 字符），已丢弃`;
+          return result;
+        }
         result.body = raw;
+        result.byteLength = raw.length;
       }
-      result.finalUrl = url;
+      result.finalUrl = response.header['location'] === undefined ? url : String(response.header['location']);
       result.ok = result.status >= 200 && result.status < 300;
       if (!result.ok) {
         result.error = `HTTP ${result.status}（重试后仍失败）`;
@@ -264,8 +278,10 @@ export class Http {
 
   static async getBytesDetailed(url: string, headers: HttpHeader[]): Promise<BytesResponse> {
     let result = await Http.getBytesOnceDetailed(url, headers);
-    // GET 图片允许重试一次；POST 请求不经过此接口，不会重复提交。
-    if (result.bytes === null) {
+    // 只重试网络错误、限流或服务端故障；404/403 和超大响应重试不会恢复。
+    const retryable = result.status === 408 || result.status === 429 || result.status >= 500 ||
+      (result.status === 0 && result.error !== '空地址');
+    if (result.bytes === null && retryable) {
       const retry = await Http.getBytesOnceDetailed(url, headers);
       if (retry.bytes !== null) return retry;
       result.error = retry.error.length > 0 ? retry.error : result.error;
@@ -298,6 +314,7 @@ export class Http {
         connectTimeout: 15000,
         readTimeout: 30000
       });
+      result.status = response.responseCode;
       if (response.responseCode < 200 || response.responseCode >= 300) {
         result.error = `HTTP ${response.responseCode}`;
         // 失败也返回完整 BytesResponse，调用方统一读取 bytes/error，避免 ArkTS 空值类型错误。
