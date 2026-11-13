@@ -24,7 +24,7 @@ function mirror(relative: string, name: string): void {
     .replaceAll("'../model/Models'", "'./Models.ts'");
   fs.writeFileSync(path.join(temp, name), source, 'utf8');
 }
-const netShim = String.raw\`
+const netShim = String.raw`
 const requests = [];
 let callCount = 0;
 export function configure(items) {
@@ -59,8 +59,8 @@ export const http = {
     destroy: () => {}
   })
 };
-\`;
-const prefsShim = String.raw\`
+`;
+const prefsShim = String.raw`
 const values = new Map();
 let active = 0;
 let maximum = 0;
@@ -84,7 +84,7 @@ export const preferences = {
 };
 export function persistedProgress() { return values.get('progress') ?? ''; }
 export function maxConcurrent() { return maximum; }
-\`;
+`;
 try {
   mirror('net/Http.ets', 'Http.ts');
   mirror('store/Library.ets', 'Library.ts');
