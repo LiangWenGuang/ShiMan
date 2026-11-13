@@ -5,6 +5,7 @@ on:
       - feat/verified-sources-ui-20261113
     paths:
       - tools/ganma-smoke.mjs
+      - tools/engine-test/live-ganma.ts
       - app/entry/src/main/resources/rawfile/sources/ganma.json
       - .github/workflows/ganma-smoke.yml
   workflow_dispatch:
