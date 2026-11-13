@@ -77,7 +77,12 @@ struct SourceManagerPage {
       if (outcome.ok && outcome.value !== undefined) {
         item.result = `可用 · 返回 ${outcome.value.length} 条`;
       } else {
-        item.result = `不可用 · ${outcome.message}`;
+        const health = SourceHealth.get(item.rule.id);
+        if (health !== null && health.ok) {
+          item.result = '站点可访问 · 该关键词无结果，解析能力待确认';
+        } else {
+          item.result = `不可用 · ${outcome.message}`;
+        }
       }
     } catch (error) {
       item.result = '不可用 · 图源自检异常';
