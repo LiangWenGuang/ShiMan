@@ -718,22 +718,24 @@ struct ReaderPage {
     .backgroundColor(BAR)
   }
 
+  /** 首章/末章导航置灰并禁止无效点击，保持可触控区域一致。 */
   @Builder
-  barButton(icon: Resource, label: string, action: () => void) {
+  barButton(icon: Resource, label: string, enabled: boolean, action: () => void) {
     Column() {
       SymbolGlyph(icon)
         .fontSize(22)
-        .fontColor([TEXT_MAIN])
+        .fontColor([enabled ? TEXT_MAIN : Theme.textDim])
       Text(label)
         .fontSize(Theme.fsMicro)
-        .fontColor(TEXT_SUB)
+        .fontColor(enabled ? TEXT_SUB : Theme.textDim)
         .margin({ top: 3 })
     }
     .layoutWeight(1)
     .height(62)
     .justifyContent(FlexAlign.Center)
+    .opacity(enabled ? 1 : 0.48)
     .onClick(() => {
-      action();
+      if (enabled) action();
     })
   }
 
@@ -758,16 +760,16 @@ struct ReaderPage {
     Column() {
       this.pageProgress()
       Row() {
-        this.barButton($r('sys.symbol.chevron_left'), '上一章', () => {
+        this.barButton($r('sys.symbol.chevron_left'), '上一章', this.detail !== null && this.chapterIndex > 0, () => {
           this.loadChapter(this.chapterIndex - 1);
         })
-        this.barButton($r('sys.symbol.list_bullet'), '目录', () => {
+        this.barButton($r('sys.symbol.list_bullet'), '目录', true, () => {
           this.openCatalog();
         })
-        this.barButton($r('sys.symbol.arrow_clockwise'), '换源', () => {
+        this.barButton($r('sys.symbol.arrow_clockwise'), '换源', true, () => {
           this.openSwitch();
         })
-        this.barButton($r('sys.symbol.chevron_right'), '下一章', () => {
+        this.barButton($r('sys.symbol.chevron_right'), '下一章', this.detail !== null && this.chapterIndex + 1 < this.detail.chapters.length, () => {
           this.loadChapter(this.chapterIndex + 1);
         })
       }
