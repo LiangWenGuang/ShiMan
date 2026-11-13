@@ -49,7 +49,16 @@ function chineseNumber(raw: string): number {
       if (pos < 0) {
         return -1;
       }
-      digit = pos === 1 ? 0 : (pos === 5 ? 2 : (pos > 5 ? pos - 1 : pos - 1));
+      if (ch === '零' || ch === '〇') digit = 0;
+      else if (ch === '一') digit = 1;
+      else if (ch === '二' || ch === '两') digit = 2;
+      else if (ch === '三') digit = 3;
+      else if (ch === '四') digit = 4;
+      else if (ch === '五') digit = 5;
+      else if (ch === '六') digit = 6;
+      else if (ch === '七') digit = 7;
+      else if (ch === '八') digit = 8;
+      else if (ch === '九') digit = 9;
     }
   }
   return total + digit;
