@@ -311,6 +311,7 @@ export function parseDetailFields(
 export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: string, applyReverse: boolean = true): ChapterBrief[] {
   const items = queryAll(doc, rule.chapters.listSelector);
   const chapters: ChapterBrief[] = [];
+  const seenUrls = new Set<string>();
   for (let i = 0; i < items.length; i++) {
     const node = items[i];
     const title = evalField(node, rule.chapters.title);
@@ -319,6 +320,11 @@ export function parseChapters(doc: HtmlDocument, rule: SourceRule, pageUrl: stri
       continue;
     }
     const url = resolveUrl(pageUrl, link);
+    // 详情页「开始阅读」按钮常与目录首章重复，按实际章节 URL 去重。
+    if (seenUrls.has(url)) {
+      continue;
+    }
+    seenUrls.add(url);
     let id = rule.chapters.id.length > 0 ? evalField(node, rule.chapters.id) : '';
     if (id.length === 0) {
       id = extractNumericId(url);
