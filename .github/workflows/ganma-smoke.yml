@@ -20,3 +20,5 @@ jobs:
           node-version: '22'
       - name: Verify search, chapters and first image
         run: node tools/ganma-smoke.mjs
+      - name: Verify actual ArkTS parsing of live public pages
+        run: node --experimental-transform-types tools/engine-test/live-ganma.ts
