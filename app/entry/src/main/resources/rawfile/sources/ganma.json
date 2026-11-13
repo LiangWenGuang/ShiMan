@@ -4,12 +4,7 @@
   "baseUrl": "https://ganma.jp",
   "charset": "utf-8",
   "note": "日本正版平台；已验证匿名搜索、详情、公开章节与正文图片。只显示网页公开章节，完结作品后续章节可能需官方会员。",
-  "headers": [
-    {
-      "name": "Referer",
-      "value": "https://ganma.jp/web"
-    }
-  ],
+  "headers": [],
   "search": {
     "url": "/web/search?keyword={kw}",
     "list": "li.grid a[href^='/web/magazine/']",
@@ -41,5 +36,17 @@
     "pattern": "(https://d1bzi54d5ruxfk\\.cloudfront\\.net/story_[a-z0-9-]+_pages_[0-9]+_orig/[0-9]+\\.jpg\\?Policy=[^\"<> ]+)",
     "maxCount": 300
   },
-  "browse": []
+  "browse": [
+    {
+      "name": "首页推荐",
+      "url": "/web",
+      "list": "a[href*='/web/magazine/']",
+      "id": "@attr:href",
+      "title": "h2@text||img@attr:alt",
+      "cover": "img@attr:src",
+      "link": "@attr:href",
+      "author": "",
+      "latest": ""
+    }
+  ]
 }
