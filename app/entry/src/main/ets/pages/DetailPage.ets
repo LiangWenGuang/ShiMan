@@ -4,7 +4,7 @@ import { SourceApi } from '../source/SourceApi';
 import { SourceRule } from '../rule/Rules';
 import { ComicDetail, ChapterBrief, ShelfItem, ReadProgress } from '../model/Models';
 import { Library } from '../store/Library';
-import { chaptersForDisplay } from '../util/ChapterOrder';
+import { chaptersForDisplay, flippedComicDetail, findChapterIndex } from '../util/ChapterOrder';
 import { DetailParams, ReaderParams, SwitchParams } from '../model/RouteParams';
 import { SwitchBus, SwitchPending } from '../store/SwitchBus';
 import { RemoteImage } from '../view/RemoteImage';
@@ -25,6 +25,8 @@ struct DetailPage {
   @State descExpanded: boolean = false;
   @State chapterWindow: number = CHAPTER_WINDOW_STEP;
   @State chapterDescending: boolean = false;
+  /** 单本漫画的阅读方向手动修正，与目录显示倒序无关。 */
+  @State chapterOrderFlipped: boolean = false;
   /** 章节目录每行几列（1 或 2），可切换并持久化 */
   @State chapterColumns: number = 2;
   @State progressHint: string = '';
@@ -90,6 +92,7 @@ struct DetailPage {
       return;
     }
     this.detail = outcome.value;
+    this.chapterOrderFlipped = Library.get().isChapterOrderFlipped(this.params.sourceId, this.params.comicId);
     this.onShelf = Library.get().isOnShelf(this.params.sourceId, this.params.comicId);
     this.favorited = Library.get().isFavorite(this.params.sourceId, this.params.comicId);
     this.chapterWindow = Math.max(CHAPTER_WINDOW_STEP, Math.min(CHAPTER_WINDOW_STEP,
@@ -119,10 +122,10 @@ struct DetailPage {
       this.progressHint = '';
       return;
     }
-    const rawIndex = progress.chapterIndex;
-    const safeIndex = rawIndex >= 0 && rawIndex < total ? rawIndex : 0;
+    const safeIndex = findChapterIndex(this.detail.chapters, progress.chapterId,
+      progress.chapterTitle, progress.chapterIndex);
     this.resumeIndex = safeIndex;
-    this.progressHint = `上次读到 ${this.detail.chapters[safeIndex].title}`;
+    this.progressHint = total > 0 ? `上次读到 ${this.detail.chapters[safeIndex].title}` : '';
     this.ensureChapterVisible(safeIndex);
   }
 
@@ -158,6 +161,29 @@ struct DetailPage {
     this.ensureChapterVisible(this.resumeIndex);
   }
 
+  /** 直接纠正本漫画的阅读先后，不改变全局目录「正序/倒序」偏好。 */
+  private toggleReadingDirection(): void {
+    if (this.detail === null || this.detail.chapters.length === 0) return;
+    const old = this.detail;
+    const previous = old.chapters[this.resumeIndex];
+    const keyId = previous === undefined ? '' : previous.chapterId;
+    const keyTitle = previous === undefined ? '' : previous.title;
+    const previousIndex = this.resumeIndex;
+    const next = !this.chapterOrderFlipped;
+    // 偏好先写入内存，回到阅读器/刷新详情不会重新变回错误顺序。
+    Library.get().setChapterOrderFlipped(this.params.sourceId, this.params.comicId, next);
+    this.chapterOrderFlipped = next;
+    this.detail = flippedComicDetail(old);
+    this.resumeIndex = findChapterIndex(this.detail.chapters, keyId, keyTitle,
+      old.chapters.length - 1 - previousIndex);
+    const progress = Library.get().progress(this.params.sourceId, this.params.comicId);
+    if (progress !== null) {
+      this.progressHint = `上次读到 ${this.detail.chapters[this.resumeIndex].title}`;
+    }
+    this.ensureChapterVisible(this.resumeIndex);
+    promptAction.showToast({ message: next ? '已纠正本漫画阅读方向' : '已恢复自动识别的阅读方向' });
+  }
+
   private openReader(index: number): void {
     if (this.detail === null) {
       return;
@@ -171,8 +197,11 @@ struct DetailPage {
     const chapter = this.detail.chapters[index];
     params.chapterId = chapter === undefined ? '' : chapter.chapterId;
     const saved = Library.get().progress(this.params.sourceId, this.params.comicId);
-    params.page = saved !== null && saved.chapterIndex === index ? saved.page : 0;
-    params.pageOffset = saved !== null && saved.chapterIndex === index ? saved.pageOffset : 0;
+    const sameChapter = saved !== null && chapter !== undefined &&
+      ((saved.chapterId.length > 0 && saved.chapterId === chapter.chapterId) ||
+        (saved.chapterId.length === 0 && saved.chapterTitle === chapter.title));
+    params.page = sameChapter && saved !== null ? saved.page : 0;
+    params.pageOffset = sameChapter && saved !== null ? saved.pageOffset : 0;
     router.pushUrl({ url: 'pages/ReaderPage', params: params });
   }
 
@@ -522,6 +551,26 @@ struct DetailPage {
         Text(`${this.detail!.chapters.length} 话`)
           .fontSize(Theme.fsCaption)
           .fontColor(Theme.textDim)
+      }
+      .width('100%')
+      .padding({ bottom: Theme.gapM })
+
+      Row() {
+        Text(this.chapterOrderFlipped ? '本漫画已手动纠正阅读先后' : '上下章顺序不对？可只纠正这一本')
+          .fontSize(Theme.fsCaption)
+          .fontColor(Theme.textDim)
+          .layoutWeight(1)
+          .maxLines(2)
+        Text(this.chapterOrderFlipped ? '恢复自动' : '纠正顺序')
+          .fontSize(Theme.fsLabel)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(Theme.accent)
+          .padding({ left: 12, right: 12, top: 7, bottom: 7 })
+          .backgroundColor(Theme.accentDim)
+          .borderRadius(Theme.radiusPill)
+          .onClick(() => {
+            this.toggleReadingDirection();
+          })
       }
       .width('100%')
       .padding({ bottom: Theme.gapM })
