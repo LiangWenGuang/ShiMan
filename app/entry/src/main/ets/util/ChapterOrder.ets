@@ -81,6 +81,8 @@ export function chapterOrderNumber(title: string): number {
   if (cn !== null) {
     return chineseNumber(cn[1]);
   }
+  // 更新日期 2026-11-14 不是第 2026 章，日期本身不参加趋势投票。
+  if (/^\d{4}[-\\/年]\d{1,2}[-\\/月]/.test(t)) return -1;
   const bare = t.match(/^(?:\s*(?:chapter|episode|ch\.?|ep\.?)\s*#?\s*)?(\d+(?:\.\d+)?)(?:\s*[话話回章节節集期]|\s*[.、:：_-]|\s*$)/i);
   if (bare !== null) {
     return parseFloat(bare[1]);
