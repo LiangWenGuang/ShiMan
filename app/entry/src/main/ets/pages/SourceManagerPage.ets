@@ -22,6 +22,7 @@ class SourceState {
 struct SourceManagerPage {
   @State items: SourceState[] = [];
   @State currentId: string = '';
+  @State enabledOnly: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
@@ -153,7 +154,7 @@ struct SourceManagerPage {
       .fontSize(Theme.fsCaption)
       .fontWeight(FontWeight.Medium)
       .fontColor(active ? Theme.accent : Theme.textSub)
-      .height(32)
+      .height(36)
       .padding({ left: 14, right: 14 })
       .backgroundColor(Theme.surfaceHi)
       .borderRadius(Theme.radiusPill)
@@ -220,7 +221,7 @@ struct SourceManagerPage {
             this.makeCurrent(item);
           })
         Blank()
-        Text(item.rule.chapters.json.enabled() || item.rule.images.type === 'web' ? '需页面解析' : '接口直连')
+        Text(item.rule.images.type === 'web' ? '页面渲染取图' : '直接解析图片')
           .fontSize(Theme.fsMicro)
           .fontColor(Theme.textDim)
       }
@@ -230,7 +231,8 @@ struct SourceManagerPage {
       if (item.result.length > 0) {
         Text(item.result)
           .fontSize(Theme.fsCaption)
-          .fontColor(item.result.startsWith('可用') ? Theme.ok : Theme.warn)
+          .fontColor(item.result.startsWith('可用') ? Theme.ok :
+            item.result.startsWith('站点可访问') ? Theme.accent : Theme.warn)
           .lineHeight(19)
           .width('100%')
           .margin({ top: Theme.gapS })
@@ -255,14 +257,50 @@ struct SourceManagerPage {
       this.navBar()
       List() {
         ListItem() {
-          Text('启用的图源会参与发现页、搜索与换源。关掉不用的源可以显著减少无效请求。')
-            .fontSize(Theme.fsCaption)
-            .fontColor(Theme.textDim)
-            .lineHeight(20)
+          Column() {
+            Row() {
+              Column() {
+                Text('图源总览')
+                  .fontSize(Theme.fsHeadline)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(Theme.text)
+                Text(`${this.items.filter((s: SourceState): boolean => s.enabled).length} 个已启用 · ${this.items.length} 个已配置`)
+                  .fontSize(Theme.fsCaption)
+                  .fontColor(Theme.textDim)
+                  .margin({ top: 5 })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+
+              Text(this.enabledOnly ? '显示全部' : '仅看启用')
+                .fontSize(Theme.fsLabel)
+                .fontColor(Theme.accent)
+                .height(36)
+                .padding({ left: 14, right: 14 })
+                .backgroundColor(Theme.accentDim)
+                .borderRadius(Theme.radiusPill)
+                .textAlign(TextAlign.Center)
+                .onClick(() => {
+                  this.enabledOnly = !this.enabledOnly;
+                })
+            }
             .width('100%')
-            .padding({ left: Theme.gapL + 4, right: Theme.gapL + 4, top: Theme.gapXs, bottom: Theme.gapL })
+            Text('关闭闲置图源可减少搜索等待；自检仅验证站点搜索，不代表正文一定可读。')
+              .fontSize(Theme.fsCaption)
+              .fontColor(Theme.textDim)
+              .lineHeight(19)
+              .margin({ top: Theme.gapM })
+              .width('100%')
+          }
+          .width('100%')
+          .padding(Theme.gapL)
+          .backgroundColor(Theme.surface)
+          .borderRadius(Theme.radiusL)
+          .margin({ bottom: Theme.gapL })
         }
-        ForEach(this.items, (item: SourceState) => {
+        .padding({ left: Theme.gapL, right: Theme.gapL })
+
+        ForEach(this.items.filter((s: SourceState): boolean => !this.enabledOnly || s.enabled), (item: SourceState) => {
           ListItem() {
             this.card(item)
           }
