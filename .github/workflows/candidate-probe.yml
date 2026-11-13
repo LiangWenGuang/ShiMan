@@ -1,0 +1,21 @@
+name: Candidate source probe
+on:
+  push:
+    branches:
+      - feat/verified-sources-ui-20261113
+    paths:
+      - tools/probe-candidates-20261113.mjs
+      - .github/workflows/candidate-probe.yml
+  workflow_dispatch:
+
+jobs:
+  probe-public-html:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Probe only public pages (status and markup)
+        run: node tools/probe-candidates-20261113.mjs
