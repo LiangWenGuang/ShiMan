@@ -196,6 +196,11 @@ export class SourceApi {
         detail.chapters = parseChapters(doc, rule, url, false);
       }
 
+      // 目录接口 HTTP 200 但 JSON 结构变更/解析为空时，也尝试详情页内的目录。
+      if (detail.chapters.length === 0) {
+        detail.chapters = parseChapters(doc, rule, url, false);
+      }
+
       // 所有入口统一应用图源方向，保证 Reader 使用的 chapterIndex 是阅读顺序索引。
       detail.chapters = normalizeChapterOrder(detail.chapters, rule.chapters.reverse);
 
