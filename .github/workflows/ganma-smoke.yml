@@ -1,0 +1,22 @@
+name: GANMA source smoke
+on:
+  push:
+    branches:
+      - feat/verified-sources-ui-20261113
+    paths:
+      - tools/ganma-smoke.mjs
+      - app/entry/src/main/resources/rawfile/sources/ganma.json
+      - .github/workflows/ganma-smoke.yml
+  workflow_dispatch:
+
+jobs:
+  public-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Verify search, chapters and first image
+        run: node tools/ganma-smoke.mjs
