@@ -59,6 +59,33 @@ try {
   check('当前源码列表解析', items.length === 1 && items[0].comicId === '12345', `${items.length} 条`);
   const images = engine.parseImagesFromJson('{"data":{"page":[{"image":"http:\\/\\/cdn.test\\/1.jpg?auth_key=x"}]}}', rule, rule.baseUrl);
   check('当前源码图片解析', images.length === 1 && images[0].url.indexOf('auth_key=x') >= 0, `${images.length} 张`);
+  const ganmaPath = path.join(repo, 'app', 'entry', 'src', 'main', 'resources', 'rawfile', 'sources', 'ganma.json');
+  const ganma = rules.ruleFromJson(json.parseJson(fs.readFileSync(ganmaPath, 'utf8')));
+  const ganmaSearch = '<ul><li class="grid"><a href="/web/magazine/kaidanloop">' +
+    '<img alt="怪談ルゥプ" src="https://cdn.example/cover.jpg"><h2>怪談ルゥプ</h2></a></li></ul>';
+  const ganmaResults = engine.parseListItems(ganmaSearch, ganma.search.listSelector, ganma.id, ganma.baseUrl,
+    ganma.search.title, ganma.search.cover, ganma.search.link,
+    ganma.search.id, ganma.search.author, ganma.search.latest);
+  check('GANMA 搜索规则可解析卡片', ganmaResults.length === 1 &&
+    ganmaResults[0].url === 'https://ganma.jp/web/magazine/kaidanloop', String(ganmaResults.length) + ' 条');
+
+  const ganmaChapters = '<a href="/web/reader/kaidanloop/story-one/0">第1話を読む</a>' +
+    '<div><a href="/web/reader/kaidanloop/story-one/0">第1話</a>' +
+    '<a href="/web/reader/kaidanloop/story-two/0">第2話</a></div>';
+  const chapterItems = engine.parseChapters(html.parseHtml(ganmaChapters), ganma,
+    'https://ganma.jp/web/magazine/kaidanloop');
+  check('GANMA 章节 CTA 与目录链接去重', chapterItems.length === 2, String(chapterItems.length) + ' 话');
+
+  const signedBase = 'https://d1bzi54d5ruxfk.cloudfront.net/story_' +
+    '936237d0-d2b2-11e9-b339-5e26199913ba_pages_1605685833000_orig/';
+  const imageOne = signedBase + '1.jpg?Policy=p\\u0026Signature=s\\u0026Key-Pair-Id=k';
+  const imageTwo = signedBase + '2.jpg?Policy=p\\u0026Signature=s\\u0026Key-Pair-Id=k';
+  const ganmaPages = '"url":"' + imageOne + '","url":"' + imageOne + '","url":"' + imageTwo + '"';
+  const decodedPages = engine.parseImagesFromRegex(ganmaPages, ganma, 'https://ganma.jp/web/reader/test');
+  check('GANMA CDN 签名正确解码与正文去重', decodedPages.length === 2 &&
+    decodedPages[0].url.includes('&Signature=s&Key-Pair-Id=k') &&
+    decodedPages[1].url.includes('/2.jpg?'), String(decodedPages.length) + ' 张');
+
   console.log(`\n===== 当前 app 源码离线回归: PASS ${pass} / FAIL ${fail} =====`);
   process.exitCode = fail === 0 ? 0 : 1;
 } finally { fs.rmSync(tempRoot, { recursive: true, force: true }); }
