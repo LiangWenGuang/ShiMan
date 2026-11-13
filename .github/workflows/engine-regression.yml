@@ -22,3 +22,5 @@ jobs:
           node-version: '22'
       - name: Offline parser and URL regression tests
         run: node --experimental-transform-types tools/engine-test/run.ts
+      - name: Offline HTTP and persistence regression tests
+        run: node --experimental-transform-types tools/engine-test/runtime.ts
