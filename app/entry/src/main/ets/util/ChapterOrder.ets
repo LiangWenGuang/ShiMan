@@ -70,7 +70,7 @@ function chineseNumber(raw: string): number {
  */
 export function chapterOrderNumber(title: string): number {
   const t = title.replace(/[０-９]/g, (v: string): string => String(v.charCodeAt(0) - 65296)).trim();
-  if (/(番外|外传|特典|特别|预告|序章|序言|前言|后记|附录|公告|插画|vol\.?\s*\d|第\s*\d+\s*卷)/i.test(t)) {
+  if (/(番外|外传|特典|特别|预告|序章|序言|前言|后记|附录|公告|插画)/i.test(t)) {
     return -1;
   }
   const labeled = t.match(/第\s*(\d+(?:\.\d+)?)\s*[话話回章节節集期]/);
@@ -81,6 +81,8 @@ export function chapterOrderNumber(title: string): number {
   if (cn !== null) {
     return chineseNumber(cn[1]);
   }
+  // 明确的「第 N 话」优先于卷号；只写 Vol.2 或第2卷不算章节。
+  if (/(vol\.?\s*\d|第\s*\d+\s*卷)/i.test(t)) return -1;
   // 更新日期 2026-11-14 不是第 2026 章，日期本身不参加趋势投票。
   if (/^\d{4}[-\\/年]\d{1,2}[-\\/月]/.test(t)) return -1;
   const bare = t.match(/^(?:\s*(?:chapter|episode|ch\.?|ep\.?)\s*#?\s*)?(\d+(?:\.\d+)?)(?:\s*[话話回章节節集期]|\s*[.、:：_-]|\s*$)/i);
