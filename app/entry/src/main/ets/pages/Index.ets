@@ -652,55 +652,67 @@ struct Index {
       })
   }
 
-  /** 首页范围行：分段控件 + 当前源（可点换源）+ 刷新 */
+  /** 首页范围行：窄屏将图源选择移到独立行，避免 360vp 设备三组控件挤压。 */
   @Builder
   homeScopeBar() {
-    Row() {
+    Column() {
       Row() {
-        this.scopeToggle('当前图源', true)
-        this.scopeToggle('全部图源', false)
-      }
-      .padding(3)
-      .backgroundColor(Theme.surface)
-      .borderRadius(Theme.radiusPill)
-
-      if (this.homeCurrentOnly) {
         Row() {
-          Text(this.currentSourceName)
-            .fontSize(Theme.fsLabel)
-            .fontColor(Theme.textSub)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          SymbolGlyph($r('sys.symbol.chevron_down'))
-            .fontSize(13)
-            .fontColor([Theme.textDim])
+          this.scopeToggle('当前图源', true)
+          this.scopeToggle('全部图源', false)
+        }
+        .padding(3)
+        .backgroundColor(Theme.surface)
+        .borderRadius(Theme.radiusPill)
+
+        Blank()
+
+        Row() {
+          SymbolGlyph($r('sys.symbol.arrow_clockwise'))
+            .fontSize(15)
+            .fontColor([this.refreshing ? Theme.textDim : Theme.accent])
+          Text('刷新')
+            .fontSize(Theme.fsCaption)
+            .fontColor(this.refreshing ? Theme.textDim : Theme.textSub)
             .margin({ left: 6 })
         }
         .height(36)
-        .padding({ left: 16, right: 14 })
+        .padding({ left: Theme.gapM, right: Theme.gapM })
         .backgroundColor(Theme.surface)
         .borderRadius(Theme.radiusPill)
-        .margin({ left: Theme.gapS })
+        .onClick(() => {
+          if (!this.refreshing) this.refreshHome();
+        })
+      }
+      .width('100%')
+
+      if (this.homeCurrentOnly) {
+        Row() {
+          Text('当前浏览')
+            .fontSize(Theme.fsCaption)
+            .fontColor(Theme.textDim)
+          Blank()
+          Text(this.currentSourceName)
+            .fontSize(Theme.fsLabel)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Theme.text)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+            .fontSize(13)
+            .fontColor([Theme.accent])
+            .margin({ left: 6 })
+        }
+        .width('100%')
+        .height(42)
+        .padding({ left: Theme.gapM, right: Theme.gapM })
+        .backgroundColor(Theme.surface)
+        .borderRadius(Theme.radiusM)
+        .margin({ top: Theme.gapS })
         .onClick(() => {
           this.pickCurrentSource();
         })
       }
-
-      Blank()
-
-      Row() {
-        SymbolGlyph($r('sys.symbol.arrow_clockwise'))
-          .fontSize(15)
-          .fontColor([this.refreshing ? Theme.textDim : Theme.accent])
-      }
-      .width(36)
-      .height(36)
-      .justifyContent(FlexAlign.Center)
-      .backgroundColor(Theme.surface)
-      .borderRadius(Theme.radiusPill)
-      .onClick(() => {
-        this.refreshHome();
-      })
     }
     .width('100%')
     .padding({ left: Theme.gapL, right: Theme.gapL, bottom: Theme.gapM })
@@ -1239,13 +1251,50 @@ struct Index {
         this.searchHistoryPanel()
       } else if (this.searchGroups.length > 0) {
         Column() {
-          Row() {
-            Text('已完成 ' + this.searchCompleted + '/' + this.searchGroups.length + ' 个图源 · ' + this.searchResults.length + ' 部')
-              .fontSize(Theme.fsCaption).fontColor(Theme.textSub).layoutWeight(1)
-            if (this.searchLoading) {
-              Button('取消').fontSize(Theme.fsLabel).onClick(() => { this.cancelSearch(); })
+          Column() {
+            Row() {
+              Column() {
+                Text('搜索进度')
+                  .fontSize(Theme.fsHeadline)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(Theme.text)
+                Text(`${this.searchCompleted}/${this.searchGroups.length} 个图源 · 找到 ${this.searchResults.length} 部漫画`)
+                  .fontSize(Theme.fsCaption)
+                  .fontColor(Theme.textDim)
+                  .margin({ top: 4 })
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+              if (this.searchLoading) {
+                Button('取消')
+                  .fontSize(Theme.fsLabel)
+                  .height(34)
+                  .backgroundColor(Theme.surfaceHi)
+                  .fontColor(Theme.textSub)
+                  .borderRadius(Theme.radiusPill)
+                  .onClick(() => { this.cancelSearch(); })
+              }
             }
-          }.width('100%').padding(Theme.gapL)
+            .width('100%')
+            Stack({ alignContent: Alignment.Start }) {
+              Row()
+                .width(this.searchGroups.length === 0 ? '0%' :
+                  `${Math.round(this.searchCompleted * 100 / this.searchGroups.length)}%`)
+                .height(3)
+                .backgroundColor(Theme.accent)
+                .borderRadius(2)
+            }
+            .width('100%')
+            .height(3)
+            .backgroundColor(Theme.line)
+            .borderRadius(2)
+            .margin({ top: Theme.gapM })
+          }
+          .width('100%')
+          .padding(Theme.gapL)
+          .margin({ bottom: Theme.gapS })
+          .backgroundColor(Theme.surface)
+          .borderRadius(Theme.radiusM)
           List({ space: Theme.gapL }) {
             ForEach(this.searchGroups, (group: SearchGroup) => {
               ListItem() {
@@ -1253,7 +1302,7 @@ struct Index {
                   Row() {
                     Text(group.name).fontSize(Theme.fsHeadline).fontWeight(FontWeight.Medium).fontColor(Theme.text)
                     Blank()
-                    Text(group.status).fontSize(Theme.fsCaption).fontColor(Theme.textSub)
+                    Text(group.status).fontSize(Theme.fsCaption).fontColor(group.items.length > 0 ? Theme.ok : Theme.textDim)
                       .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis }).constraintSize({ maxWidth: '55%' })
                   }.width('100%').padding({ left: Theme.gapL, right: Theme.gapL })
                   if (group.items.length > 0) {
