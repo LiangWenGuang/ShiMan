@@ -37,6 +37,9 @@ export class Library {
   /** 星标收藏：和书架分开存，书架是「在追」，收藏是「想留着」 */
   private favoriteItems: ShelfItem[] = [];
   private progressItems: Map<string, ReadProgress> = new Map<string, ReadProgress>();
+  /** 同一个 Preferences 键的写入必须串行，合并高频滚动产生的快照。 */
+  private progressPersisting: boolean = false;
+  private progressDirty: boolean = false;
   /** 详情页与阅读器共用的目录展示顺序，不影响章节原始索引 */
   private chapterDescending: boolean = false;
   /** 章节目录每行几列（1 或 2），详情页可切换并持久化 */
@@ -103,9 +106,9 @@ export class Library {
     if (this.store === null) {
       return;
     }
-    this.store.put(KEY_CHAPTER_DESCENDING, descending).then(() => {
+    this.store.put(KEY_CHAPTER_DESCENDING, descending).then(async () => {
       if (this.store !== null) {
-        this.store.flush();
+        await this.store.flush();
       }
     }).catch(() => {
       // 内存中的偏好仍然生效，下次启动沿用上次成功写入的值
@@ -125,9 +128,9 @@ export class Library {
     if (this.store === null) {
       return;
     }
-    this.store.put(KEY_CHAPTER_COLUMNS, next).then(() => {
+    this.store.put(KEY_CHAPTER_COLUMNS, next).then(async () => {
       if (this.store !== null) {
-        this.store.flush();
+        await this.store.flush();
       }
     }).catch(() => {
       // 内存偏好仍生效
@@ -397,24 +400,44 @@ export class Library {
     if (this.store === null) {
       return;
     }
-    const list = this.history();
-    const lines: string[] = [];
-    for (let i = 0; i < list.length; i++) {
-      const item = list[i];
-      lines.push([
-        enc(item.sourceId), enc(item.comicId), enc(item.title), enc(item.cover),
-        enc(item.chapterId), String(item.chapterIndex), enc(item.chapterTitle),
-        String(item.page), String(item.updatedAt), enc(item.url),
-        String(Math.max(0, item.pageOffset))
-      ].join('\t'));
+    this.progressDirty = true;
+    if (this.progressPersisting) {
+      return;
     }
-    this.store.put(KEY_PROGRESS, lines.join('\n')).then(() => {
-      if (this.store !== null) {
-        this.store.flush();
+    this.progressPersisting = true;
+    this.flushProgressQueue();
+  }
+
+  /** 只保留最新进度快照；上一轮落盘完成前不启动并发写入。 */
+  private async flushProgressQueue(): Promise<void> {
+    try {
+      while (this.progressDirty) {
+        this.progressDirty = false;
+        const store = this.store;
+        if (store === null) {
+          return;
+        }
+        const list = this.history();
+        const lines: string[] = [];
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
+          lines.push([
+            enc(item.sourceId), enc(item.comicId), enc(item.title), enc(item.cover),
+            enc(item.chapterId), String(item.chapterIndex), enc(item.chapterTitle),
+            String(item.page), String(item.updatedAt), enc(item.url),
+            String(Math.max(0, item.pageOffset))
+          ].join('\t'));
+        }
+        try {
+          await store.put(KEY_PROGRESS, lines.join('\n'));
+          await store.flush();
+        } catch (error) {
+          // 当前写入失败不应阻塞后续进度更新。
+        }
       }
-    }).catch(() => {
-      // 忽略写入失败
-    });
+    } finally {
+      this.progressPersisting = false;
+    }
   }
 
   // ─────────────────────────── 搜索历史 ───────────────────────────
@@ -480,9 +503,9 @@ export class Library {
     for (let i = 0; i < this.searchHistoryItems.length; i++) {
       lines.push(enc(this.searchHistoryItems[i]));
     }
-    this.store.put(KEY_SEARCH_HISTORY, lines.join('\n')).then(() => {
+    this.store.put(KEY_SEARCH_HISTORY, lines.join('\n')).then(async () => {
       if (this.store !== null) {
-        this.store.flush();
+        await this.store.flush();
       }
     }).catch(() => {
       // 忽略写入失败

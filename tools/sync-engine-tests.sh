@@ -9,7 +9,7 @@
 # 手改 tools/engine-test/*.ts 会被这个脚本覆盖，要改就改 app 里的 .ets。
 set -euo pipefail
 
-ROOT="F:/AI/QoderCN-Data/output/harmony-comic-origin"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/tools/engine-test"
 
 copy() {

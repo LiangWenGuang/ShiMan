@@ -1,0 +1,26 @@
+name: Engine regression
+
+on:
+  push:
+    branches:
+      - main
+      - fix/runtime-safety-and-regressions-20261113
+  pull_request:
+    paths:
+      - 'app/entry/src/main/ets/**'
+      - 'tools/engine-test/**'
+      - '.github/workflows/engine-regression.yml'
+
+jobs:
+  offline-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Offline parser and URL regression tests
+        run: node --experimental-transform-types tools/engine-test/run.ts
+      - name: Offline HTTP and persistence regression tests
+        run: node --experimental-transform-types tools/engine-test/runtime.ts

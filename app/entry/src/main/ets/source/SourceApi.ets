@@ -196,6 +196,11 @@ export class SourceApi {
         detail.chapters = parseChapters(doc, rule, url, false);
       }
 
+      // 目录接口 HTTP 200 但 JSON 结构变更/解析为空时，也尝试详情页内的目录。
+      if (detail.chapters.length === 0) {
+        detail.chapters = parseChapters(doc, rule, url, false);
+      }
+
       // 所有入口统一应用图源方向，保证 Reader 使用的 chapterIndex 是阅读顺序索引。
       detail.chapters = normalizeChapterOrder(detail.chapters, rule.chapters.reverse);
 
@@ -227,8 +232,9 @@ export class SourceApi {
         .set('comicId', comicId)
         .set('url', chapter.url);
       result.needsHarvest = true;
-      result.harvestUrl = vars.apply(rule.images.url).length > 0
-        ? vars.apply(rule.images.url) : chapter.url;
+      const harvestTarget = vars.apply(rule.images.url);
+      result.harvestUrl = resolveUrl(chapter.url.length > 0 ? chapter.url : rule.baseUrl,
+        harvestTarget.length > 0 ? harvestTarget : chapter.url);
       result.readySelector = rule.images.readySelector;
       result.extract = rule.images.extract;
       result.settleMs = rule.images.settleMs;
@@ -240,8 +246,9 @@ export class SourceApi {
       .set('chapterId', chapter.chapterId)
       .set('comicId', comicId)
       .set('url', chapter.url);
-    const target = vars.apply(rule.images.url).length > 0
-      ? vars.apply(rule.images.url) : chapter.url;
+    const targetTemplate = vars.apply(rule.images.url);
+    const target = resolveUrl(chapter.url.length > 0 ? chapter.url : rule.baseUrl,
+      targetTemplate.length > 0 ? targetTemplate : chapter.url);
     const response: HttpResponse = await Http.get(target, buildHeaders(rule, chapter.url), rule.charset);
     if (!response.ok) {
       SourceHealth.record(rule.id, false, response.error);

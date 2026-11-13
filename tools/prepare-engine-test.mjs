@@ -3,8 +3,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ETS = 'F:/AI/QoderCN-Data/output/harmony-comic-origin/app/entry/src/main/ets';
-const OUT = 'F:/AI/QoderCN-Data/output/harmony-comic-origin/tools/engine-test';
+const ROOT = path.resolve(import.meta.dirname, '..');
+const ETS = path.join(ROOT, 'app', 'entry', 'src', 'main', 'ets');
+const OUT = path.join(ROOT, 'tools', 'engine-test');
 
 const FILES = [
   ['model/Models.ets', 'Models.ts'],
