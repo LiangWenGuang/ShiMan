@@ -227,8 +227,9 @@ export class SourceApi {
         .set('comicId', comicId)
         .set('url', chapter.url);
       result.needsHarvest = true;
-      result.harvestUrl = vars.apply(rule.images.url).length > 0
-        ? vars.apply(rule.images.url) : chapter.url;
+      const harvestTarget = vars.apply(rule.images.url);
+      result.harvestUrl = resolveUrl(chapter.url.length > 0 ? chapter.url : rule.baseUrl,
+        harvestTarget.length > 0 ? harvestTarget : chapter.url);
       result.readySelector = rule.images.readySelector;
       result.extract = rule.images.extract;
       result.settleMs = rule.images.settleMs;
@@ -240,8 +241,9 @@ export class SourceApi {
       .set('chapterId', chapter.chapterId)
       .set('comicId', comicId)
       .set('url', chapter.url);
-    const target = vars.apply(rule.images.url).length > 0
-      ? vars.apply(rule.images.url) : chapter.url;
+    const targetTemplate = vars.apply(rule.images.url);
+    const target = resolveUrl(chapter.url.length > 0 ? chapter.url : rule.baseUrl,
+      targetTemplate.length > 0 ? targetTemplate : chapter.url);
     const response: HttpResponse = await Http.get(target, buildHeaders(rule, chapter.url), rule.charset);
     if (!response.ok) {
       SourceHealth.record(rule.id, false, response.error);
