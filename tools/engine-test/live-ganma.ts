@@ -52,6 +52,12 @@ try{
  console.log('parsed search items',a.map(x=>x.title).slice(0,5),b.map(x=>x.title).slice(0,5));
  assert(a.some(x=>x.url.endsWith('/web/magazine/kaidanloop')),'真实搜索 A 命中怪談ルゥプ');
  assert(b.some(x=>x.url.endsWith('/web/magazine/regacy')),'真实搜索 B 命中レガシー');
+ const browse=rule.browse[0];
+ const homeItems=engine.parseListItems(await page('https://ganma.jp/web'),browse.listSelector,rule.id,
+   'https://ganma.jp/web',browse.title,browse.cover,browse.link,browse.id,browse.author,browse.latest);
+ console.log('parsed GANMA homepage cards',homeItems.length,homeItems.slice(0,4).map(x=>x.title));
+ assert(homeItems.length>=3,'真实首页推荐列表解析');
+
  const detailUrl='https://ganma.jp/web/magazine/kaidanloop';
  const detail=html.parseHtml(await page(detailUrl));
  const fields=engine.parseDetailFields(detail,rule,detailUrl);
