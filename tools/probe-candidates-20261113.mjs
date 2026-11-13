@@ -87,3 +87,30 @@ for(const [name,url] of more){
     imageUrlCount:(html.match(/imageUrl/gi)||[]).length,sample:sample.slice(0,300)}));
  }catch(e){console.log(JSON.stringify({name,url,error:String(e)}));}finally{clearTimeout(timer);}
 }
+
+async function targeted(name,url,fn){
+ const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),11000);
+ try {const r=await fetch(url,{signal:ctl.signal,headers:{'User-Agent':'Mozilla/5.0'}});const h=(await r.text()).slice(0,1200000);console.log(JSON.stringify({name,status:r.status,...fn(h,r.url)}));}
+ catch(e){console.log(JSON.stringify({name,error:String(e)}));}finally{clearTimeout(timer);}
+}
+await targeted('ganma-structure-search','https://ganma.jp/web/search?keyword=%E6%80%AA%E8%AB%87',(h)=>{
+ const k=h.indexOf('href="/web/magazine/kaidanloop"');
+ return {card:h.slice(Math.max(0,k-300),k+1500)};
+});
+await targeted('ganma-structure-detail','https://ganma.jp/web/magazine/kaidanloop',(h)=>{
+ const k=h.indexOf('href="/web/reader/kaidanloop/');
+ return {header:h.slice(Math.max(0,h.indexOf('<h1')-300),h.indexOf('<h1')+400),chapter:h.slice(Math.max(0,k-270),k+1200)};
+});
+await targeted('ganma-structure-reader','https://ganma.jp/web/reader/kaidanloop/936237d0-d2b2-11e9-b339-5e26199913ba/0',(h)=>{
+ const k=h.indexOf('imageUrl'),m=h.match(/https?:[^"'<> ]{10,400}\.jpe?g/gi)||[];
+ return {imageUrlSnippet:h.slice(Math.max(0,k-400),k+1100),jpegSnippets:m.slice(0,4).map(x=>x.slice(0,180)),
+   imageTagCount:(h.match(/<img\b/gi)||[]).length,episodeImgLinks:(h.match(/imageUrl/gi)||[]).length};
+});
+await targeted('walker-structure-search','https://comic-walker.com/search?keyword=DOG',(h)=>{
+ const k=h.indexOf('__NEXT_DATA__');const a=h.indexOf('KC_003497_S',k);
+ return {nextSnippet:h.slice(a-200,a+1600),searchResultCount:(h.match(/"code":"KC_/g)||[]).length};
+});
+await targeted('walker-structure-reader','https://comic-walker.com/detail/KC_003497_S/episodes/KC_0034970000100012_E?episodeType=comics',(h)=>{
+ const k=h.indexOf('__NEXT_DATA__'); const pics=(h.match(/https:\/\/cdn\.comic-walker\.com\/integration\/cdpf\/resources\/[a-zA-Z0-9\/._-]+\.(?:jpe?g|webp)/g)||[]);
+ return {nextSnippet:h.slice(k,k+700),imageCount:pics.length,firstPictures:[...new Set(pics)].slice(0,4)};
+});
