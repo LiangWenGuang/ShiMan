@@ -60,3 +60,30 @@ for(const origin of results.filter(x=>x.name==='dm5-search'||x.name==='manhuagui
  }catch(e){console.log(JSON.stringify({name:origin.name+'-detail-follow',url,error:String(e)}));}
  finally{clearTimeout(timer);}
 }
+
+const more=[
+ ['ganma-search-keyword','https://ganma.jp/web/search?keyword=%E6%80%AA%E8%AB%87'],
+ ['ganma-search-q','https://ganma.jp/web/search?q=%E6%80%AA%E8%AB%87'],
+ ['ganma-search-query','https://ganma.jp/web/search?query=%E6%80%AA%E8%AB%87'],
+ ['ganma-search-b','https://ganma.jp/web/search?keyword=%E3%83%AC%E3%82%AC%E3%82%B7%E3%83%BC'],
+ ['comicwalker-search','https://comic-walker.com/search?keyword=DOG'],
+ ['manhuagui-chapter','https://www.manhuagui.com/comic/62362/923084.html'],
+ ['dm5-detail','https://cnc.dm5.com/manhua-huoyingrenzhetedian/'],
+ ['dm5-chapter','https://cnc.dm5.com/m794921/']
+];
+for(const [name,url] of more){
+ const ctl=new AbortController();const timer=setTimeout(()=>ctl.abort(),11000);
+ try{
+  const r=await fetch(url,{signal:ctl.signal,headers:{'User-Agent':'Mozilla/5.0'}});
+  const html=(await r.text()).slice(0,900000);
+  const anchor=(html.match(/<a\b[^>]*href=["'][^"']+["'][^>]*>/gi)||[]).filter(x=>/web\/magazine|\/comic\/|\/m\d+\/|reader/i.test(x)).slice(0,6).map(x=>x.slice(0,250));
+  const markerNames=['imageUrl','imageUrl\\','pageImage','chapterImages','img_data','chapter_data','dm5imagefun','chapterfun','__NEXT_DATA__','__next_f.push','pageCount','imageUrls'];
+  const contexts={};
+  for(const marker of markerNames){const at=html.indexOf(marker);if(at>=0)contexts[marker]=html.slice(Math.max(0,at-110),at+450);}
+  const cdn=(html.match(/https?:\\?\/\\?\/[^\s"'<>{}]{20,230}?\.(?:jpg|jpeg|webp|png)(?:\?[^"'<> ]{0,200})?/gi)||[]).slice(0,6);
+  const sample=html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>[\s\S]{0,500}/i)?.[0]??'';
+  console.log(JSON.stringify({name,status:r.status,final:r.url,title:html.match(/<title[^>]*>([^<]+)/i)?.[1],bytes:html.length,
+    anchors:anchor,contexts,cdn:cdn.map(x=>x.slice(0,180)),readerPageCount:(html.match(/page_number/gi)||[]).length,
+    imageUrlCount:(html.match(/imageUrl/gi)||[]).length,sample:sample.slice(0,300)}));
+ }catch(e){console.log(JSON.stringify({name,url,error:String(e)}));}finally{clearTimeout(timer);}
+}
