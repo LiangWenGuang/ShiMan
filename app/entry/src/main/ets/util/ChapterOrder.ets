@@ -1,4 +1,4 @@
-import { ChapterBrief } from '../model/Models';
+import { ChapterBrief, ComicDetail } from '../model/Models';
 
 /**
  * 章节内在阅读顺序（与「目录正序/倒序展示」完全独立）。
@@ -136,6 +136,22 @@ export function detectChapterDirection(chapters: ChapterBrief[]): boolean | null
     return desc === 1;
   }
   return null;
+}
+
+/** 新建详情实例触发 ArkUI @State 更新；避免直接修改旧章节数组导致 UI 不刷新。 */
+export function flippedComicDetail(detail: ComicDetail): ComicDetail {
+  const result = new ComicDetail();
+  result.sourceId = detail.sourceId;
+  result.comicId = detail.comicId;
+  result.title = detail.title;
+  result.cover = detail.cover;
+  result.author = detail.author;
+  result.description = detail.description;
+  result.status = detail.status;
+  result.tags = detail.tags.slice();
+  result.url = detail.url;
+  result.chapters = flipChapterOrder(detail.chapters);
+  return result;
 }
 
 /** 通过章节标识恢复阅读进度，避免图源重排后旧 index 指向另一章。 */
